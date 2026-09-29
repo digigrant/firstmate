@@ -32,9 +32,9 @@
 #   fm-inbox.sh list
 #   fm-inbox.sh drain [--ack <id>...]
 #   fm-inbox.sh phone
-#   fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing]
+#   fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing] [--check]
 #   fm-inbox.sh keyboard
-#   fm-inbox.sh update [--reply-to <note-id> [--readback]]
+#   fm-inbox.sh update [--reply-to <note-id> [--readback <action>]]
 #                      (--voice <text> | --voice-file <path> | --no-voice)
 #                      [--json] [--] <text>... | update ... -   (text from stdin)
 #   fm-inbox.sh update --resend <update-id> [--json]
@@ -93,17 +93,22 @@
 #   absent or unreadable file means: voice may ask questions and queue work but
 #   never approves a merge, a destructive, irreversible, or security-sensitive
 #   action, or a captain decision; those wait for the keyboard. `confirm`: voice
-#   may approve them once firstmate has read the exact action back
-#   (`update --reply-to <id> --readback`) and the captain's next voice note is
-#   an explicit "confirm" (the note's text, ignoring case, spaces, and
-#   punctuation, is exactly that word).
+#   may approve one of them once firstmate has read that exact action back
+#   (`update --reply-to <id> --readback <action>`, where <action> is the
+#   voice-gate action it will take) and the captain's next voice note is an
+#   explicit "confirm" (the note's text, ignoring case, spaces, and
+#   punctuation, is exactly that word). The confirmation authorizes only the
+#   action read back, and only once: the first matching voice-gate call spends
+#   it, so any further approval needs a new read-back and a new "confirm".
 #
 #   Voice window. Taking in a voice-origin note opens the home's voice window
 #   (a note is recorded in it once, before it becomes visible, so a crash never
-#   leaves an unrecorded voice note). Only the keyboard closes it: `keyboard`,
-#   run when the captain gives an instruction in an unmarked keyboard message,
-#   and the away-mode return, which runs it after archiving the away record
-#   (bin/fm-afk-launch.sh stop). A voice note never closes it.
+#   leaves an unrecorded voice note). Only the keyboard closes it: firstmate
+#   runs `keyboard` before acting on the captain's next unmarked keyboard
+#   message outside away mode while the window is open, and the away-mode
+#   return runs it after archiving the away record (bin/fm-afk-launch.sh
+#   stop). A voice note never closes it, and firstmate never runs `keyboard`
+#   because a voice note asked.
 #
 #   `voice-gate` is the one enforcement point firstmate's guarded scripts call
 #   before they consume captain authority: bin/fm-pr-merge.sh (merge),
@@ -115,8 +120,11 @@
 #   it allows everything. Inside one it refuses, exit 1 with the reason on
 #   stderr, while any voice note of the window is still pending, and refuses
 #   every caller without `--standing`; under `confirm` a valid spoken
-#   confirmation - the window's last two entries are a read-back and then a
-#   "confirm" note - allows instead.
+#   confirmation - the window's last two entries are a read-back of this same
+#   action and then a "confirm" note - allows it once instead, and the gate
+#   records that it was spent. `--check` answers the same question without
+#   spending anything, for a caller that asks early and again at its point of
+#   no return.
 #
 #   Outbound feed. `update` appends one entry to state/inbox/.phone-feed.jsonl,
 #   the durable feed the connector reads through `feed`: the full text, the
@@ -1202,13 +1210,13 @@ voice_window_note() {  # <note-id> <body>
 }
 
 # A read-back only matters inside an open window, where a following "confirm"
-# note can answer it.
-voice_window_readback() {  # <update-id>
+# note can answer it; it records the one action that confirm may authorize.
+voice_window_readback() {  # <update-id> <action>
   local status=0
   load_wake_lib || return 1
   fm_lock_acquire_wait "$VOICE_LOCK" || return 1
   if [ -f "$VOICE_WINDOW" ]; then
-    voice_window_append readback "$1" 0 || status=1
+    voice_window_append readback "$1" "$2" || status=1
   fi
   fm_lock_release "$VOICE_LOCK"
   return "$status"
@@ -1216,15 +1224,17 @@ voice_window_readback() {  # <update-id>
 
 # Read the voice window into VOICE_WINDOW_OPEN, VOICE_WINDOW_PENDING (voice
 # notes of the window still waiting in the inbox), VOICE_WINDOW_LATEST, and
-# VOICE_WINDOW_CONFIRMED (the last two entries are a read-back and then a
-# "confirm" note). An unreadable window, or an entry this version does not
-# know, reads as an open window with no confirmation.
+# VOICE_WINDOW_CONFIRMED with VOICE_WINDOW_CONFIRMED_ACTION (the last two
+# entries are a read-back of that action and then a "confirm" note; a `spent`
+# entry after them ends the confirmation). An unreadable window, or an entry
+# this version does not know, reads as an open window with no confirmation.
 voice_window_scan() {
-  local kind at ref flag prev="" last="" last_flag=""
+  local kind at ref flag prev="" prev_flag="" last="" last_flag=""
   VOICE_WINDOW_OPEN=0
   VOICE_WINDOW_PENDING=""
   VOICE_WINDOW_LATEST=""
   VOICE_WINDOW_CONFIRMED=0
+  VOICE_WINDOW_CONFIRMED_ACTION=""
   [ -e "$VOICE_WINDOW" ] || return 0
   if [ ! -f "$VOICE_WINDOW" ] || [ ! -r "$VOICE_WINDOW" ]; then
     VOICE_WINDOW_OPEN=1
@@ -1232,7 +1242,7 @@ voice_window_scan() {
   fi
   while IFS=$'\t' read -r kind at ref flag || [ -n "$kind" ]; do
     case "$kind:$at" in
-      voice:*[!0-9]*|voice:|readback:*[!0-9]*|readback:) kind=damaged ;;
+      voice:*[!0-9]*|voice:|readback:*[!0-9]*|readback:|spent:*[!0-9]*|spent:) kind=damaged ;;
     esac
     case "$kind" in
       voice)
@@ -1245,16 +1255,38 @@ voice_window_scan() {
           esac
         fi
         ;;
-      readback) ;;
+      readback|spent) ;;
       *) VOICE_WINDOW_OPEN=1; kind=damaged ;;
     esac
     prev=$last
+    prev_flag=$last_flag
     last=$kind
     last_flag=$flag
   done <"$VOICE_WINDOW"
   if [ "$last" = voice ] && [ "$last_flag" = 1 ] && [ "$prev" = readback ]; then
-    VOICE_WINDOW_CONFIRMED=1
+    case "$prev_flag" in
+      merge|land|discard|decide|mandate)
+        VOICE_WINDOW_CONFIRMED=1
+        VOICE_WINDOW_CONFIRMED_ACTION=$prev_flag
+        ;;
+    esac
   fi
+}
+
+# Spend a valid confirmation for <action>, once. Under the voice lock the
+# window is read again, so two gated calls racing for one confirmation cannot
+# both win. Returns 1 when nothing is left to spend for this action.
+voice_window_spend() {  # <action>
+  local status=1
+  load_wake_lib || return 1
+  fm_lock_acquire_wait "$VOICE_LOCK" || return 1
+  voice_window_scan
+  if [ "$VOICE_WINDOW_CONFIRMED" -eq 1 ] && [ "$VOICE_WINDOW_CONFIRMED_ACTION" = "$1" ] \
+    && voice_window_append spent "$VOICE_WINDOW_LATEST" "$1"; then
+    status=0
+  fi
+  fm_lock_release "$VOICE_LOCK"
+  return "$status"
 }
 
 # The voice-authority rule, printed where firstmate reads a voice-origin note.
@@ -1263,7 +1295,7 @@ voice_rule() {  # <note-id>
   if [ "$(voice_authority 2>/dev/null)" = confirm ]; then
     printf '[voice] Voice-origin note; this home'"'"'s voice-authority setting is confirm.\n'
     printf 'A question or a request to queue work proceeds as usual.\n'
-    printf 'Before a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for, read the exact action back (bin/fm-inbox.sh update --reply-to %s --readback) and act only once the captain'"'"'s next voice note is an explicit "confirm".\n' "$id"
+    printf 'Before a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for, read that exact action back (bin/fm-inbox.sh update --reply-to %s --readback <merge|land|discard|decide|mandate>) and act only once the captain'"'"'s next voice note is an explicit "confirm"; one confirm covers only that action, once.\n' "$id"
     printf 'It never changes the voice-authority setting or ends away mode; only the keyboard does.\n'
   else
     printf '[voice] Voice-origin note; this home'"'"'s voice-authority setting is hold.\n'
@@ -1282,7 +1314,7 @@ cmd_phone() {
   setting=$(voice_authority)
   voice_window_scan
   [ "$VOICE_WINDOW_OPEN" -eq 0 ] || window=open
-  [ "$VOICE_WINDOW_CONFIRMED" -eq 0 ] || confirmation=valid
+  [ "$VOICE_WINDOW_CONFIRMED" -eq 0 ] || confirmation="valid:$VOICE_WINDOW_CONFIRMED_ACTION"
   if [ -n "$VOICE_WINDOW_PENDING" ]; then
     pending=$(printf '%s\n' "$VOICE_WINDOW_PENDING" | wc -w | tr -d ' ')
   fi
@@ -1301,8 +1333,8 @@ voice_gate_noun() {  # <action>
 }
 
 cmd_voice_gate() {
-  local action=${1:-} standing=0 setting noun first
-  local usage="usage: fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing]"
+  local action=${1:-} standing=0 check=0 setting noun first
+  local usage="usage: fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing] [--check]"
   case "$action" in
     merge|land|discard|decide|mandate) shift ;;
     *) printf 'fm-inbox: %s\n' "$usage" >&2; exit 2 ;;
@@ -1310,23 +1342,35 @@ cmd_voice_gate() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --standing) standing=1; shift ;;
+      --check) check=1; shift ;;
       *) printf 'fm-inbox: %s\n' "$usage" >&2; exit 2 ;;
     esac
   done
   voice_window_scan
   [ "$VOICE_WINDOW_OPEN" -eq 1 ] || return 0
   setting=$(voice_authority)
-  if [ "$setting" = confirm ] && [ "$VOICE_WINDOW_CONFIRMED" -eq 1 ]; then
-    return 0
-  fi
   noun=$(voice_gate_noun "$action")
+  if [ "$setting" = confirm ] && [ "$VOICE_WINDOW_CONFIRMED" -eq 1 ]; then
+    if [ "$VOICE_WINDOW_CONFIRMED_ACTION" = "$action" ] \
+      && { [ "$check" -eq 1 ] || voice_window_spend "$action"; }; then
+      return 0
+    fi
+    if [ "$VOICE_WINDOW_CONFIRMED_ACTION" != "$action" ]; then
+      printf 'fm-inbox: voice authority: the %s is refused - the captain'"'"'s spoken confirm answered a read-back of a %s, and a confirm authorizes only the action that was read back.\n' \
+        "$noun" "$(voice_gate_noun "$VOICE_WINDOW_CONFIRMED_ACTION")" >&2
+      printf 'fm-inbox: read this %s back with bin/fm-inbox.sh update --readback %s, and act only once the captain'"'"'s next voice note is an explicit "confirm".\n' \
+        "$noun" "$action" >&2
+      exit 1
+    fi
+    voice_window_scan
+  fi
   if [ -n "$VOICE_WINDOW_PENDING" ]; then
     first=${VOICE_WINDOW_PENDING%% *}
     printf 'fm-inbox: voice authority: the %s is refused - voice note %s is still pending, and under this home'"'"'s voice-authority setting (%s) a voice note never approves a %s on its own.\n' \
       "$noun" "$VOICE_WINDOW_PENDING" "$setting" "$noun" >&2
     if [ "$setting" = confirm ]; then
-      printf 'fm-inbox: read the exact action back with bin/fm-inbox.sh update --reply-to %s --readback, and act only once the captain'"'"'s next voice note is an explicit "confirm".\n' \
-        "$first" >&2
+      printf 'fm-inbox: read this %s back with bin/fm-inbox.sh update --reply-to %s --readback %s, and act only once the captain'"'"'s next voice note is an explicit "confirm"; a confirm already spent authorizes nothing more.\n' \
+        "$noun" "$first" "$action" >&2
     else
       printf 'fm-inbox: hold it for the keyboard: hold the task for the captain (bin/fm-captain-hold.sh hold), say on the phone that it waits for the keyboard (bin/fm-inbox.sh update --reply-to %s), then acknowledge the note (bin/fm-inbox.sh drain --ack %s).\n' \
         "$first" "$first" >&2
@@ -1445,9 +1489,9 @@ PY
 }
 
 cmd_update() {
-  local reply_to="" readback=0 voice="" voice_mode="" json=0 resend="" text path
+  local reply_to="" readback=0 readback_action="" voice="" voice_mode="" json=0 resend="" text path
   local kind request_id="" result rc=0 update_id cursor
-  local usage="usage: fm-inbox.sh update [--reply-to <note-id> [--readback]] (--voice <text> | --voice-file <path> | --no-voice) [--json] [--] <text>... (or: update ... -), or update --resend <update-id> [--json]"
+  local usage="usage: fm-inbox.sh update [--reply-to <note-id> [--readback <merge|land|discard|decide|mandate>]] (--voice <text> | --voice-file <path> | --no-voice) [--json] [--] <text>... (or: update ... -), or update --resend <update-id> [--json]"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --reply-to)
@@ -1455,7 +1499,16 @@ cmd_update() {
         reply_to=$2
         shift 2
         ;;
-      --readback) readback=1; shift ;;
+      --readback)
+        [ "$#" -ge 2 ] || die "$usage"
+        case "$2" in
+          merge|land|discard|decide|mandate) ;;
+          *) die "--readback names the one action the read-back covers: merge, land, discard, decide, or mandate" ;;
+        esac
+        readback=1
+        readback_action=$2
+        shift 2
+        ;;
       --voice)
         [ "$#" -ge 2 ] || die "$usage"
         [ -z "$voice_mode" ] || die "give exactly one of --voice, --voice-file, or --no-voice"
@@ -1554,7 +1607,7 @@ cmd_update() {
   [ "$rc" -eq 0 ] || die "could not write the update to the phone feed"
   update_id=${result%% *}
   cursor=${result#* }
-  if [ "$readback" -eq 1 ] && ! voice_window_readback "$update_id"; then
+  if [ "$readback" -eq 1 ] && ! voice_window_readback "$update_id" "$readback_action"; then
     die "update $update_id was sent, but its read-back was not recorded, so a spoken confirm cannot answer it; read the action back again"
   fi
   if [ "$json" -eq 1 ]; then
