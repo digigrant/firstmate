@@ -489,6 +489,46 @@ EOF
   pass "fm-merge-local: a registry change cannot redirect an in-flight local-only task"
 }
 
+# A voice note never approves a local-only landing under the default
+# voice-authority setting; a yolo task's standing approval still lands once the
+# voice note is handled.
+test_local_merge_is_held_for_the_keyboard_after_a_voice_note() {
+  local home proj id main fix out rc note inbox="$ROOT/bin/fm-inbox.sh"
+  home="$TMP_ROOT/local-merge-voice/home"
+  proj="$TMP_ROOT/local-merge-voice/proj"
+  id=local-merge-voice
+  mkdir -p "$home/state" "$home/data" "$home/config" "$proj"
+  : > "$home/config/phone-channel"
+  git -C "$proj" init -q || fail "could not initialize local-merge voice fixture"
+  git -C "$proj" config user.email test@example.com
+  git -C "$proj" config user.name test
+  printf 'base\n' > "$proj/base"
+  git -C "$proj" add base || fail "could not stage voice fixture base"
+  git -C "$proj" commit -qm base || fail "could not commit voice fixture base"
+  main=$(git -C "$proj" branch --show-current)
+  git -C "$proj" checkout -qb "fm/$id" || fail "could not create the voice fixture branch"
+  printf 'change\n' > "$proj/change"
+  git -C "$proj" add change || fail "could not stage the voice fixture change"
+  git -C "$proj" commit -qm change || fail "could not commit the voice fixture change"
+  fix=$(git -C "$proj" rev-parse HEAD)
+  git -C "$proj" checkout -q "$main" || fail "could not restore the voice fixture default branch"
+  printf 'project=%s\nmode=local-only\nbranch=fm/%s\n' "$proj" "$id" > "$home/state/$id.meta"
+  note=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" note --origin voice \
+    --request-id land-1 --json "land it" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || fail "the voice note was refused"
+  rc=0
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$MERGE_LOCAL" "$id" 2>&1) || rc=$?
+  [ "$rc" -eq 1 ] || fail "a voice-backed local landing was not refused (rc=$rc): $out"
+  assert_contains "$out" "voice cannot approve it" "the refusal did not name the voice rule"
+  [ "$(git -C "$proj" rev-parse HEAD)" != "$fix" ] || fail "the voice-backed landing moved the default branch"
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" drain --ack "$note" >/dev/null
+  printf 'yolo=on\n' >> "$home/state/$id.meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$MERGE_LOCAL" "$id" 2>&1) \
+    || fail "a yolo landing was refused once the voice note was handled: $out"
+  [ "$(git -C "$proj" rev-parse HEAD)" = "$fix" ] || fail "the yolo landing did not fast-forward"
+  pass "fm-merge-local: a voice note never approves a landing, while yolo standing approval still lands"
+}
+
 # A registered name may contain spaces, and the lookup must match the whole
 # name rather than only its first whitespace-delimited token (issue #1977).
 # The longer "foo bar" row is listed before the "foo" row so a leading-prefix
@@ -1623,6 +1663,7 @@ test_promotion_delivers_the_real_definition_of_done
 test_promotion_persists_the_selected_ship_branch
 test_promotion_branch_command_is_shell_safe
 test_local_merge_uses_the_recorded_ship_branch
+test_local_merge_is_held_for_the_keyboard_after_a_voice_note
 test_project_mode_matches_whole_multiword_names
 test_project_mode_maps_the_conditional_policy
 test_project_mode_binds_the_forge_orthogonally

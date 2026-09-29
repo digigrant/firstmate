@@ -8,9 +8,22 @@
 # the home is afk; the captain's first unmarked message archives it (the return
 # path in bin/fm-afk-return.sh calls `archive` through bin/fm-afk-launch.sh stop).
 # Being away changes how the captain is informed and what happens at a
-# captain-owned decision point, never the authority set. Hold-for-return is the
-# only reach profile this release records: there is no phone channel, and the
-# entry announcement says so every time.
+# captain-owned decision point, never the authority set.
+#
+# REACH. Two reach profiles exist, fixed at entry and said aloud in every entry
+# announcement. Hold-for-return (`reach_channels: none`) is the default: nothing
+# reaches the captain until the return. The phone (`reach_channels: phone`) is
+# the first reach channel on a home that opted into the phone channel
+# (config/phone-channel; bin/fm-inbox.sh owns that channel, its voice-authority
+# rule, and its outbound feed): phone updates are on for the whole away window,
+# so replies and escalations, decisions included, go to the phone instead of
+# only waiting for the return. The phone may switch away mode on (an ordinary
+# `enter` handling a voice note), but only the keyboard switches it off: the
+# return archives the record, which switches phone updates off.
+# Away words are captain authority, so `enter` with words asks bin/fm-inbox.sh
+# voice-gate first and records nothing when the voice window refuses them: under
+# the default voice-authority setting, voice can switch away mode on but can
+# never write or replace the mandate.
 #
 # AWAY OR QUIET. The same record also backs daemon-backed quiet mode, which a
 # quiet entry marks with `mode: quiet`: the captain is present there, so a quiet
@@ -50,7 +63,7 @@
 #   entered: <UTC ISO 8601>
 #   entered_epoch: <seconds>
 #   expected_return: <UTC ISO 8601> | -
-#   reach_channels: none
+#   reach_channels: none | phone
 #   reach_announced: <the one-sentence reach announcement>
 #   spend_max_concurrent_workers: <n>
 #   confirmed: <UTC ISO 8601>       when this mandate was recorded; /afk itself
@@ -137,6 +150,8 @@ FM_AFK_CONTRACT_VERSION=2
 # Older record versions this script still reads (never writes).
 FM_AFK_CONTRACT_READABLE_VERSIONS="1 2"
 FM_AFK_CONTRACT_REACH_ANNOUNCED='No phone channel is configured; anything that needs you waits for your return.'
+FM_AFK_CONTRACT_REACH_PHONE_HOLD='Phone updates are on: replies, decisions, and anything else that needs you come to your phone; by voice you can ask questions and queue work, approvals wait for the keyboard, and your first keyboard message switches phone updates off.'
+FM_AFK_CONTRACT_REACH_PHONE_CONFIRM='Phone updates are on: replies, decisions, and anything else that needs you come to your phone; you can approve by voice once the exact action is read back to you and you say "confirm", and your first keyboard message switches phone updates off.'
 FM_AFK_CONTRACT_SPEND_DEFAULT=4
 FM_AFK_CONTRACT_QUIET_HOLDS_NOTHING='you are present, so nothing waits for your return: every action you ask for, a local landing or a merge included, proceeds now under ordinary attended authority, and quiet mode changes only which updates reach this conversation.'
 # Generous against the longest legitimate holder, a merge waiting on the forge,
@@ -249,16 +264,39 @@ fm_afk_contract_validate_iso() {  # <ts>
   fm_utc_iso_to_epoch "$1" >/dev/null 2>&1
 }
 
+# Resolve the reach profile for a new record into REACH and REACH_ANNOUNCED.
+# bin/fm-inbox.sh owns whether the phone channel is configured and what the
+# voice-authority setting is; a home that has not opted in keeps hold-for-return.
+fm_afk_contract_reach_resolve() {
+  local phone opted authority
+  REACH=none
+  REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_ANNOUNCED
+  if ! phone=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$FM_AFK_CONTRACT_STATE" \
+    "$FM_AFK_CONTRACT_DIR/fm-inbox.sh" phone); then
+    fm_afk_contract_log "could not read the phone channel's state; recording hold-for-return"
+    return 0
+  fi
+  opted=$(printf '%s\n' "$phone" | sed -n 's/^opted_in=//p')
+  [ "$opted" = 1 ] || return 0
+  authority=$(printf '%s\n' "$phone" | sed -n 's/^voice_authority=//p')
+  REACH=phone
+  if [ "$authority" = confirm ]; then
+    REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE_CONFIRM
+  else
+    REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE_HOLD
+  fi
+}
+
 # Render a whole record on stdout.
-# Inputs: WORDS (verbatim), EXPECTED_RETURN, SPEND.
+# Inputs: WORDS (verbatim), EXPECTED_RETURN, SPEND, REACH, REACH_ANNOUNCED.
 fm_afk_contract_render_record() {  # <entered-iso> <entered-epoch> <confirmed-iso> <confirmed-epoch>
   local entered=$1 entered_epoch=$2 confirmed=$3 confirmed_epoch=$4
   printf 'version: %s\n' "$FM_AFK_CONTRACT_VERSION"
   printf 'entered: %s\n' "$entered"
   printf 'entered_epoch: %s\n' "$entered_epoch"
   printf 'expected_return: %s\n' "${EXPECTED_RETURN:--}"
-  printf 'reach_channels: none\n'
-  printf 'reach_announced: %s\n' "$FM_AFK_CONTRACT_REACH_ANNOUNCED"
+  printf 'reach_channels: %s\n' "${REACH:-none}"
+  printf 'reach_announced: %s\n' "${REACH_ANNOUNCED:-$FM_AFK_CONTRACT_REACH_ANNOUNCED}"
   printf 'spend_max_concurrent_workers: %s\n' "${SPEND:-$FM_AFK_CONTRACT_SPEND_DEFAULT}"
   printf 'confirmed: %s\n' "$confirmed"
   printf 'confirmed_epoch: %s\n' "$confirmed_epoch"
@@ -353,7 +391,10 @@ fm_afk_contract_validate() {  # <path>
   expected=$(fm_afk_contract_read_field "$path" expected_return)
   [ "$expected" = - ] || fm_afk_contract_validate_iso "$expected" || { fm_afk_contract_log "record $path has no valid expected_return"; return 1; }
   reach=$(fm_afk_contract_read_field "$path" reach_channels)
-  [ "$reach" = none ] || { fm_afk_contract_log "record $path has no valid reach_channels"; return 1; }
+  case "$reach" in
+    none|phone) ;;
+    *) fm_afk_contract_log "record $path has no valid reach_channels"; return 1 ;;
+  esac
   announced=$(fm_afk_contract_read_field "$path" reach_announced)
   [ -n "$announced" ] || { fm_afk_contract_log "record $path has no reach announcement"; return 1; }
   spend=$(fm_afk_contract_read_field "$path" spend_max_concurrent_workers)
@@ -373,6 +414,14 @@ fm_afk_contract_validate() {  # <path>
 }
 
 # --- rendering --------------------------------------------------------------
+
+fm_afk_contract_reach_label() {  # <path>
+  if [ "$(fm_afk_contract_read_field "$1" reach_channels)" = phone ]; then
+    printf 'phone updates on'
+  else
+    printf 'hold-for-return only'
+  fi
+}
 
 # The read-back is the record's content and nothing else: the words verbatim
 # beside the entry time, expected return, spend cap, and reach line. Firstmate's
@@ -395,7 +444,8 @@ fm_afk_contract_render_readback() {  # <path>
     printf '  entered: %s\n' "$(fm_afk_contract_read_field "$path" entered)"
     printf '  expected return: %s\n' "$( [ "$expected" = - ] && printf 'not given' || printf '%s' "$expected")"
     printf '  spend cap: %s concurrent workers\n' "$spend"
-    printf '  reach: hold-for-return only. %s\n' "$(fm_afk_contract_read_field "$path" reach_announced)"
+    printf '  reach: %s. %s\n' "$(fm_afk_contract_reach_label "$path")" \
+      "$(fm_afk_contract_read_field "$path" reach_announced)"
   fi
   words=$(fm_afk_contract_read_words "$path"; rc=$?; printf x; exit "$rc") || return 1
   words=${words%x}
@@ -409,7 +459,7 @@ fm_afk_contract_render_readback() {  # <path>
 }
 
 fm_afk_contract_render_announcement() {  # <path>
-  local path=$1 expected words mandate_text
+  local path=$1 expected words mandate_text reach_outcome='waits for your return'
   if [ "$(fm_afk_contract_record_mode "$path")" = quiet ]; then
     printf 'Quiet mode recorded at %s: %s Only an explicit /quiet off ends it.\n' \
       "$(fm_afk_contract_read_field "$path" confirmed)" "$FM_AFK_CONTRACT_QUIET_HOLDS_NOTHING"
@@ -418,13 +468,15 @@ fm_afk_contract_render_announcement() {  # <path>
   expected=$(fm_afk_contract_read_field "$path" expected_return)
   words=$(fm_afk_contract_read_words "$path"; rc=$?; printf x; exit "$rc") || return 1
   words=${words%x}
+  [ "$(fm_afk_contract_read_field "$path" reach_channels)" != phone ] || reach_outcome='comes to your phone'
   if [ -n "$words" ]; then
-    mandate_text='Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return.'
+    mandate_text="Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, $reach_outcome."
   else
-    mandate_text='No away instructions were recorded; the away session acts on standing authority only, and anything that needs you waits for your return.'
+    mandate_text="No away instructions were recorded; the away session acts on standing authority only, and anything that needs you $reach_outcome."
   fi
-  printf 'Away posture recorded at %s: hold-for-return only. %s %s Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: %s. Spend cap: %s concurrent workers.\n' \
+  printf 'Away posture recorded at %s: %s. %s %s Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: %s. Spend cap: %s concurrent workers.\n' \
     "$(fm_afk_contract_read_field "$path" confirmed)" \
+    "$(fm_afk_contract_reach_label "$path")" \
     "$(fm_afk_contract_read_field "$path" reach_announced)" \
     "$mandate_text" \
     "$( [ "$expected" = - ] && printf 'not given' || printf '%s' "$expected")" \
@@ -523,6 +575,15 @@ fm_afk_contract_cmd_enter() {
     fm_afk_contract_render_readback "$record"
     return
   fi
+  # New words are a new mandate: captain authority that voice alone never
+  # grants under the default voice-authority setting (bin/fm-inbox.sh owns the
+  # rule and prints the reason).
+  if [ -n "$WORDS" ] && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$FM_AFK_CONTRACT_STATE" \
+    "$FM_AFK_CONTRACT_DIR/fm-inbox.sh" voice-gate mandate; then
+    fm_afk_contract_log "the away instructions were not recorded and nothing changed; enter without words to switch away mode on, or record the words once the keyboard has given them"
+    return 1
+  fi
+  fm_afk_contract_reach_resolve
   now=$(fm_afk_contract_now_iso)
   now_epoch=$(date +%s)
   session_entered=$now

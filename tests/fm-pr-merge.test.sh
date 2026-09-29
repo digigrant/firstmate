@@ -3387,6 +3387,136 @@ test_a_record_made_unreadable_before_the_merge_refuses_it() {
 # action, so a merge that cannot take it has no locked window to merge in and
 # refuses - including on this attended case, where the record is absent and
 # there is no away authority to read at all.
+# The phone channel's inbox, run against a merge case's home and state.
+inbox_in() {
+  local case_dir=$1
+  shift
+  FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-inbox.sh" "$@"
+}
+
+voice_note_in() {  # <case-dir> <request-id> <text>
+  inbox_in "$1" note --origin voice --request-id "$2" --json "$3" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+}
+
+refute_gh_merge() {  # <case-dir> <label>
+  if grep -q '^pr merge ' "$1/gh.log"; then
+    fail "$2: gh was asked to merge: $(grep '^pr merge ' "$1/gh.log")"
+  fi
+}
+
+# Under the default voice-authority setting a voice-tagged "merge it" never
+# becomes merge authority: the merge is held for the keyboard until the
+# captain's keyboard instruction closes the voice window.
+test_voice_merge_it_is_held_for_the_keyboard() {
+  local case_dir rc url head note
+  head=a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+  url=https://github.com/example/repo/pull/91
+
+  case_dir=$(make_case voice-merge-held)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  note=$(voice_note_in "$case_dir" rec-merge-1 "merge it") || fail "voice-merge-held: the voice note was refused"
+  assert_grep "check: captain inbox note $note [voice] - merge it" "$case_dir/state/.wake-queue" \
+    "voice-merge-held: the wake firstmate reads lost the voice marker"
+  assert_contains "$(inbox_in "$case_dir" list)" "waits for the keyboard" \
+    "voice-merge-held: reading the note did not carry the voice-authority rule"
+
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-held: a merge while the voice note is pending must be refused"
+  assert_grep "voice note $note is still pending" "$case_dir/stderr" \
+    "voice-merge-held: the refusal did not name the pending voice note"
+  assert_grep 'hold it for the keyboard' "$case_dir/stderr" \
+    "voice-merge-held: the refusal did not say the merge waits for the keyboard"
+  refute_gh_merge "$case_dir" voice-merge-held
+  assert_no_grep "pr=$url" "$case_dir/state/task-x1.meta" \
+    "voice-merge-held: the refused merge recorded PR metadata"
+
+  # Acknowledging the note after holding it does not turn it into authority:
+  # the voice window still stands until the keyboard closes it.
+  inbox_in "$case_dir" drain --ack "$note" >/dev/null || fail "voice-merge-held: ack failed"
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-held: an acknowledged voice note must still not authorize the merge"
+  assert_grep 'waits for the keyboard' "$case_dir/stderr" \
+    "voice-merge-held: the refusal did not say the approval waits for the keyboard"
+  refute_gh_merge "$case_dir" voice-merge-held-acked
+
+  # The captain's keyboard instruction closes the window, and the merge lands.
+  inbox_in "$case_dir" keyboard >/dev/null || fail "voice-merge-held: keyboard failed"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-held: the keyboard-approved merge failed: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 91 example/repo --squash
+
+  # A replayed recording is acknowledged without being taken in again, so it
+  # never reopens the window the keyboard closed.
+  [ "$(voice_note_in "$case_dir" rec-merge-1 "merge it")" = "$note" ] \
+    || fail "voice-merge-held: the re-sent recording became a second note"
+  [ "$(inbox_in "$case_dir" phone | sed -n 's/^voice_window=//p')" = closed ] \
+    || fail "voice-merge-held: the re-sent recording reopened the voice window"
+
+  # Standing authority the captain gave at the keyboard still acts once the
+  # voice note is handled: away authority and a yolo task.
+  case_dir=$(make_case voice-merge-away)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  write_away_record "$case_dir" --words 'merge the windows fix when green'
+  note=$(voice_note_in "$case_dir" rec-away-1 "merge it now") || fail "voice-merge-away: the voice note was refused"
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-away: away authority must not merge while the voice note is pending"
+  refute_gh_merge "$case_dir" voice-merge-away
+  inbox_in "$case_dir" drain --ack "$note" >/dev/null || fail "voice-merge-away: ack failed"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-away: the away-authority merge failed once the note was handled: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 91 example/repo --squash
+
+  case_dir=$(make_case voice-merge-yolo)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  printf '\nyolo=on\n' >> "$case_dir/state/task-x1.meta"
+  note=$(voice_note_in "$case_dir" rec-yolo-1 "merge it") || fail "voice-merge-yolo: the voice note was refused"
+  inbox_in "$case_dir" drain --ack "$note" >/dev/null || fail "voice-merge-yolo: ack failed"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-yolo: a yolo merge failed once the note was handled: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 91 example/repo --squash
+  pass "a voice-tagged \"merge it\" is held for the keyboard under the default setting, while keyboard, away, and yolo authority still merge"
+}
+
+# Under read-back-and-confirm, voice approves only after the exact action is
+# read back and the captain's next voice note is an explicit "confirm".
+test_voice_merge_needs_a_readback_and_confirm_under_confirm() {
+  local case_dir rc url head note
+  head=b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+  url=https://github.com/example/repo/pull/92
+  case_dir=$(make_case voice-merge-confirm)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  printf 'confirm\n' > "$case_dir/home/config/voice-authority"
+  note=$(voice_note_in "$case_dir" rec-c-1 "merge it") || fail "voice-merge-confirm: the voice note was refused"
+
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-confirm: a merge with no read-back must be refused"
+  assert_grep 'read the exact action back' "$case_dir/stderr" \
+    "voice-merge-confirm: the refusal did not ask for a read-back"
+  refute_gh_merge "$case_dir" voice-merge-confirm
+
+  inbox_in "$case_dir" update --reply-to "$note" --readback \
+    --voice 'I will merge the windows fix. Say confirm.' \
+    "I will merge $url. Say confirm." >/dev/null || fail "voice-merge-confirm: the read-back failed"
+  voice_note_in "$case_dir" rec-c-2 " Confirm. " >/dev/null || fail "voice-merge-confirm: the confirmation was refused"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-confirm: the confirmed merge failed: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 92 example/repo --squash
+  pass "under the confirm setting a voice merge waits for a read-back and a spoken confirm"
+}
+
 test_merge_refuses_when_the_away_record_cannot_be_locked() {
   local case_dir rc holder_pid i lock
   case_dir=$(make_case away-lock-unavailable)
@@ -3875,6 +4005,8 @@ test_unreadable_away_record_refuses_merge
 test_away_record_cannot_change_between_the_authority_read_and_the_merge
 test_a_record_made_unreadable_before_the_merge_refuses_it
 test_merge_refuses_when_the_away_record_cannot_be_locked
+test_voice_merge_it_is_held_for_the_keyboard
+test_voice_merge_needs_a_readback_and_confirm_under_confirm
 test_allow_red_refused_on_gitlab
 test_required_check_that_never_reported_refuses
 test_required_checks_reported_and_green_merge

@@ -74,6 +74,35 @@ test_branch_prompt_is_byte_stable_and_above_cache_floor() {
 
 # --- append-only outcome store ------------------------------------------------
 
+# While phone updates are on, a captain outcome also reaches the phone feed;
+# routine outcomes and a home whose phone updates are off send nothing.
+test_captain_outcomes_reach_the_phone_while_away() {
+  local home seq feed inbox="$ROOT/bin/fm-inbox.sh"
+  home="$TMP_ROOT/phone-outcome-home"
+  mkdir -p "$home/state" "$home/config"
+  : > "$home/config/phone-channel"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append \
+    --task task-1 --verdict captain --summary 'attended decision' >/dev/null || fail "attended append failed"
+  [ ! -e "$home/state/inbox/.phone-feed.jsonl" ] || fail "an attended captain outcome reached the phone"
+  FM_HOME="$home" "$ROOT/bin/fm-afk-contract.sh" enter >/dev/null || fail "could not enter away mode"
+  seq=$(FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append \
+    --task task-2 --verdict captain --summary 'PR https://example.com/pr/2 needs your merge call') \
+    || fail "away captain append failed"
+  [ "$seq" = 2 ] || fail "the phone feed changed what append prints: $seq"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append \
+    --task task-3 --verdict routine --summary 'worker healthy' >/dev/null || fail "routine append failed"
+  feed=$(FM_HOME="$home" "$inbox" feed) || fail "feed read failed"
+  python3 - "$feed" <<'PY' || fail "the phone feed is not exactly the away captain outcome: $feed"
+import json, sys
+updates = json.loads(sys.argv[1])["updates"]
+assert len(updates) == 1, updates
+u = updates[0]
+assert u["kind"] == "escalation" and u["voice"] is None, u
+assert u["text"] == "PR https://example.com/pr/2 needs your merge call", u
+PY
+  pass "while phone updates are on, only captain outcomes reach the phone feed"
+}
+
 test_outcome_store_is_append_only_with_cursor_reads() {
   local home store snapshot seq1 seq2 unread replay out status
   home="$TMP_ROOT/store-home"
@@ -1546,6 +1575,7 @@ test_outcome_append_keeps_a_bounded_display_tail
 test_outcome_tail_keeps_whole_newest_rows_within_its_byte_budget
 test_outcome_seed_tail_creates_only_an_absent_display_tail
 test_outcome_seed_tail_only_reads_bounded_suffix
+test_captain_outcomes_reach_the_phone_while_away
 test_outcome_startup_replay_preserves_silence
 test_outcome_startup_replay_stops_at_captain_barrier
 test_outcome_cursor_corruption_fails_closed

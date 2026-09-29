@@ -199,6 +199,34 @@ unit_pi_enter_stop_does_not_claim_a_daemon_terminal() {
   rm -rf "$st"
 }
 
+# On a home that opted into the phone channel, /afk records the phone as the
+# reach, and the keyboard return (stop) switches phone updates off and closes
+# the voice window a phone message opened.
+unit_phone_reach_ends_at_the_keyboard_return() {
+  local st out rc inbox="$ROOT/bin/fm-inbox.sh"
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-phone.XXXXXX")
+  mkdir -p "$st/state" "$st/config"
+  : > "$st/config/phone-channel"
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" enter 2>&1) \
+    || fail "phone reach: enter failed: $out"
+  printf '%s' "$out" | grep -F 'phone updates on. Phone updates are on:' >/dev/null \
+    || fail "phone reach: the announcement did not say phone updates are on: $out"
+  [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^updates=//p')" = on ] \
+    || fail "phone reach: phone updates are not on while away"
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" note --origin voice --request-id back-1 \
+    "I am back, switch away mode off" >/dev/null || fail "phone reach: the voice note was refused"
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" stop 2>&1)
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -e "$st/state/.afk-contract" ] \
+    && [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^updates=//p')" = off ] \
+    && [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^voice_window=//p')" = closed ]; then
+    pass "phone reach: /afk switches phone updates on, and the keyboard return switches them off and closes the voice window"
+  else
+    fail "phone reach: the return left phone updates or the voice window open (rc=$rc): $out"
+  fi
+  rm -rf "$st"
+}
+
 unit_daemon_entry_requires_the_record() {
   local st out rc
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-entry-record.XXXXXX")
@@ -1727,6 +1755,7 @@ unit_retired_two_step_entry_is_refused
 unit_pi_never_launches_the_daemon
 unit_test_harness_seam_requires_the_marker
 unit_pi_enter_stop_does_not_claim_a_daemon_terminal
+unit_phone_reach_ends_at_the_keyboard_return
 unit_daemon_entry_requires_the_record
 unit_failed_daemon_launch_preserves_the_record
 unit_stop_archives_the_record_last

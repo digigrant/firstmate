@@ -6,7 +6,9 @@
 # announced state of notes that predate the marker, bounded receipts JSON with
 # omission disclosure, the reply cursor's strict order, and the readiness
 # projection's model-aware verdict and unknown path. Human note/list/drain
-# behaviour stays unchanged when the new flags are omitted.
+# behaviour stays unchanged when the new flags are omitted. The phone channel's
+# cases cover the opt-in, the voice-origin marker in every view, re-sent
+# recordings, the voice-authority gate under hold and confirm, and the feed.
 set -euo pipefail
 
 # shellcheck source=tests/lib.sh
@@ -544,3 +546,183 @@ run_inbox "$home" drain --ack "$did" >/dev/null || fail "drain --ack failed"
 assert_absent "$home/state/inbox/$did.note" "acked note leaves pending"
 assert_present "$home/state/inbox/handled/$did.note" "acked note is in handled"
 pass "drain --ack still moves the note to handled"
+
+# --- phone channel: voice-origin notes, voice authority, outbound feed -------
+
+phone_home() {  # <name> [voice-authority]
+  local home
+  home=$(make_home "$1")
+  : > "$home/config/phone-channel"
+  [ -z "${2:-}" ] || printf '%s\n' "$2" > "$home/config/voice-authority"
+  printf '%s\n' "$home"
+}
+
+phone_field() {  # <home> <key>
+  run_inbox "$1" phone | sed -n "s/^$2=//p"
+}
+
+gate_code() {  # <home> <gate args...>
+  local home=$1 rc=0
+  shift
+  run_inbox "$home" voice-gate "$@" 2>/dev/null || rc=$?
+  printf '%s\n' "$rc"
+}
+
+away_record() {  # <home>: an away record whose reach is the phone
+  FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" FM_CONFIG_OVERRIDE="$1/config" \
+    "$ROOT/bin/fm-afk-contract.sh" enter >/dev/null
+}
+
+# Without the opt-in, nothing voice-origin enters and nothing is sent.
+home=$(make_home phone-off)
+set +e
+off_note=$(run_inbox "$home" note --origin voice --request-id off-1 --json "merge it" 2>&1)
+off_note_code=$?
+off_update=$(run_inbox "$home" update --no-voice "hello" 2>&1)
+off_update_code=$?
+set -e
+expect_code 1 "$off_note_code" "a voice note is refused without the phone channel"
+assert_contains "$off_note" "phone-channel" "the refusal names the opt-in file"
+expect_code 1 "$off_update_code" "the feed refuses without the phone channel"
+assert_contains "$off_update" "phone-channel" "the feed refusal names the opt-in file"
+assert_equals "0" "$(count_notes "$home")" "a refused voice note writes nothing"
+assert_absent "$home/state/inbox/.phone-feed.jsonl" "no feed exists without the opt-in"
+plain=$(run_inbox "$home" note --json "typed note") || fail "a plain note still works"
+assert_not_contains "$plain" '"origin"' "a typed note's receipt gains no origin key"
+assert_equals "0" "$(gate_code "$home" merge)" "with no voice window every authority passes"
+pass "without config/phone-channel no voice note enters and the gate allows everything"
+
+# A voice note keeps its marker everywhere firstmate reads it, and a re-sent
+# recording is acknowledged without being taken in twice.
+home=$(phone_home phone-intake)
+first=$(run_inbox "$home" note --origin voice --request-id rec-1 --json "merge it") \
+  || fail "a voice note should be accepted once opted in"
+vid=$(printf '%s' "$first" | json_get id)
+assert_equals "voice" "$(printf '%s' "$first" | json_get origin)" "the receipt carries the voice origin"
+assert_grep "origin=voice" "$home/state/inbox/$vid.note" "the note records its voice origin"
+assert_grep "check: captain inbox note $vid [voice] - merge it" "$home/state/.wake-queue" \
+  "the wake line firstmate reads keeps the voice marker"
+list_out=$(run_inbox "$home" list)
+assert_contains "$list_out" "[voice] Voice-origin note; this home's voice-authority setting is hold." \
+  "list prints the voice-authority rule with the note"
+assert_contains "$list_out" "waits for the keyboard" "the default rule holds approvals for the keyboard"
+assert_equals "voice" "$(run_inbox "$home" receipts | json_get pending 0 origin)" \
+  "receipts carry the voice origin"
+again=$(run_inbox "$home" note --origin voice --request-id rec-1 --json "merge it") \
+  || fail "a re-sent recording should be acknowledged"
+assert_equals "replay" "$(printf '%s' "$again" | json_get outcome)" "a re-sent recording is a replay"
+assert_equals "$vid" "$(printf '%s' "$again" | json_get id)" "a re-sent recording keeps its note"
+assert_equals "1" "$(count_notes "$home")" "a re-sent recording is not taken in twice"
+assert_equals "1" "$(count_wakes "$home")" "a re-sent recording does not wake firstmate twice"
+assert_equals "1" "$(grep -c "^voice" "$home/state/inbox/.voice-window")" \
+  "a re-sent recording is recorded in the voice window once"
+pass "a voice note keeps its marker in every view and a re-sent recording is taken in once"
+
+# A crash after the request id is reserved still records the voice note in the
+# window before the replay makes it visible.
+home=$(phone_home phone-crash)
+mkdir -p "$home/state/inbox/.requests"
+printf '%s\n' "1700000000-voicecrash" > "$home/state/inbox/.requests/rec-crash"
+run_inbox "$home" note --origin voice --request-id rec-crash --json "land it" >/dev/null \
+  || fail "the replay after a reservation-only crash should complete"
+assert_grep "1700000000-voicecrash" "$home/state/inbox/.voice-window" \
+  "the completed voice note is in the voice window"
+assert_equals "1" "$(gate_code "$home" land)" "the recovered voice note still holds a landing"
+pass "a voice note completed after a crash is recorded in the voice window"
+
+# The gate under the default setting: a pending voice note holds everything;
+# once handled, only standing authority passes until the keyboard closes it.
+home=$(phone_home phone-gate)
+vid=$(run_inbox "$home" note --origin voice --request-id g-1 --json "merge it" | json_get id)
+for action in merge land discard decide mandate; do
+  assert_equals "1" "$(gate_code "$home" "$action")" "pending voice note holds $action"
+done
+assert_equals "1" "$(gate_code "$home" merge --standing)" "a pending voice note holds standing authority too"
+set +e
+gate_err=$(run_inbox "$home" voice-gate merge 2>&1 >/dev/null)
+set -e
+assert_contains "$gate_err" "voice note $vid is still pending" "the refusal names the pending note"
+run_inbox "$home" drain --ack "$vid" >/dev/null
+assert_equals "0" "$(gate_code "$home" merge --standing)" "handled voice notes leave standing authority alone"
+assert_equals "1" "$(gate_code "$home" merge)" "attended authority waits for the keyboard"
+assert_equals "open" "$(phone_field "$home" voice_window)" "the window stays open after the note is handled"
+assert_contains "$(run_inbox "$home" keyboard)" "closed the voice window" "keyboard closes the window"
+assert_equals "0" "$(gate_code "$home" merge)" "after the keyboard, attended authority passes"
+assert_equals "closed" "$(phone_field "$home" voice_window)" "the window is closed"
+set +e
+run_inbox "$home" voice-gate approve >/dev/null 2>&1
+bad_action=$?
+set -e
+expect_code 2 "$bad_action" "an unknown gate action is a usage error"
+pass "under hold, voice approves nothing until the keyboard closes the voice window"
+
+# Under confirm, a read-back followed by an explicit spoken confirm approves;
+# anything else, and any setting typo, holds.
+home=$(phone_home phone-confirm confirm)
+vid=$(run_inbox "$home" note --origin voice --request-id c-1 --json "merge it" | json_get id)
+assert_equals "1" "$(gate_code "$home" merge)" "confirm without a read-back holds"
+run_inbox "$home" note --origin voice --request-id c-0 "confirm" >/dev/null
+assert_equals "1" "$(gate_code "$home" merge)" "a confirm with no read-back before it holds"
+run_inbox "$home" update --reply-to "$vid" --readback --voice "I will merge it. Say confirm." \
+  "I will merge the pull request. Say confirm." >/dev/null || fail "the read-back should be sent"
+assert_equals "1" "$(gate_code "$home" merge)" "a read-back alone holds"
+run_inbox "$home" note --origin voice --request-id c-2 "yes do it" >/dev/null
+assert_equals "1" "$(gate_code "$home" merge)" "anything but an explicit confirm holds"
+run_inbox "$home" update --reply-to "$vid" --readback --voice "Say confirm." "Say confirm." >/dev/null
+run_inbox "$home" note --origin voice --request-id c-3 " Confirm! " >/dev/null
+assert_equals "valid" "$(phone_field "$home" confirmation)" "the spoken confirm is recognized"
+assert_equals "0" "$(gate_code "$home" merge)" "a read-back followed by confirm approves"
+printf 'bogus\n' > "$home/config/voice-authority"
+assert_equals "hold" "$(phone_field "$home" voice_authority)" "an unknown setting reads as hold"
+assert_equals "1" "$(gate_code "$home" merge)" "an unknown setting never approves by voice"
+pass "under confirm, only a read-back followed by a spoken confirm approves"
+
+# The outbound feed: replies whenever opted in, escalations only while phone
+# updates are on, unique update ids, and a re-send that keeps its id.
+home=$(phone_home phone-feed)
+vid=$(run_inbox "$home" note --origin voice --request-id f-1 --json "what is running" | json_get id)
+typed=$(run_inbox "$home" note "typed" | sed -n 's/^queued //p')
+reply=$(run_inbox "$home" update --reply-to "$vid" --voice "Two jobs are running." --json \
+  "Two jobs are running: https://example.invalid/pull/1") || fail "a reply should be sent"
+assert_equals "created" "$(printf '%s' "$reply" | json_get outcome)" "the reply is created"
+uid=$(printf '%s' "$reply" | json_get update_id)
+case "$uid" in fmu-[0-9a-f]*) ;; *) fail "update id has an unexpected shape: $uid" ;; esac
+set +e
+typed_reply=$(run_inbox "$home" update --reply-to "$typed" --no-voice "no" 2>&1)
+typed_code=$?
+missing_voice=$(run_inbox "$home" update --reply-to "$vid" "no voice version" 2>&1)
+missing_code=$?
+set -e
+expect_code 1 "$typed_code" "a reply to a typed note is refused"
+assert_contains "$typed_reply" "not a voice-origin note" "the refusal says why"
+expect_code 1 "$missing_code" "an update without a voice version is refused"
+assert_contains "$missing_voice" "--voice" "the refusal names the voice flag"
+skipped=$(run_inbox "$home" update --voice "A decision is waiting." --json "A decision is waiting.")
+assert_equals "skipped" "$(printf '%s' "$skipped" | json_get outcome)" \
+  "an escalation is not sent while phone updates are off"
+away_record "$home"
+assert_equals "on" "$(phone_field "$home" updates)" "an away record on this home turns phone updates on"
+esc=$(run_inbox "$home" update --voice "A decision is waiting." --json \
+  "A decision is waiting on the release PR.") || fail "an escalation should be sent while away"
+esc_id=$(printf '%s' "$esc" | json_get update_id)
+[ "$esc_id" != "$uid" ] || fail "two updates share an id"
+resent=$(run_inbox "$home" update --resend "$uid" --json) || fail "a re-send should succeed"
+assert_equals "$uid" "$(printf '%s' "$resent" | json_get update_id)" "a re-sent update keeps its id"
+feed=$(run_inbox "$home" feed) || fail "feed should read"
+assert_equals "3" "$(printf '%s' "$feed" | json_len updates)" "the feed holds reply, escalation, and re-send"
+assert_equals "reply escalation reply" "$(printf '%s' "$feed" | python3 -c 'import json,sys
+print(" ".join(u["kind"] for u in json.load(sys.stdin)["updates"]))')" "the feed keeps send order"
+assert_equals "True" "$(printf '%s' "$feed" | json_get updates 2 resend)" "the re-send is marked"
+assert_equals "f-1" "$(printf '%s' "$feed" | json_get updates 0 reply_to_request_id)" \
+  "a reply names the phone's request id"
+assert_equals "Two jobs are running." "$(printf '%s' "$feed" | json_get updates 0 voice)" \
+  "the voice-friendly version travels with the full text"
+cursor=$(printf '%s' "$feed" | json_get updates 0 cursor)
+assert_equals "2" "$(run_inbox "$home" feed --after "$cursor" | json_len updates)" \
+  "feed --after returns only later entries"
+set +e
+run_inbox "$home" update --resend fmu-0000 >/dev/null 2>&1
+unknown_resend=$?
+set -e
+expect_code 1 "$unknown_resend" "re-sending an unknown update is refused"
+pass "the phone feed carries replies and away escalations with unique ids that a re-send keeps"
