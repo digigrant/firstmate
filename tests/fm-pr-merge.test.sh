@@ -3336,18 +3336,28 @@ test_voice_merge_needs_a_readback_and_confirm_under_confirm() {
   rc=0
   run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
   expect_code 1 "$rc" "voice-merge-confirm: a merge with no read-back must be refused"
-  assert_grep 'read the exact action back' "$case_dir/stderr" \
+  assert_grep 'read this merge back' "$case_dir/stderr" \
     "voice-merge-confirm: the refusal did not ask for a read-back"
   refute_gh_merge "$case_dir" voice-merge-confirm
 
-  inbox_in "$case_dir" update --reply-to "$note" --readback \
+  inbox_in "$case_dir" update --reply-to "$note" --readback merge \
     --voice 'I will merge the windows fix. Say confirm.' \
     "I will merge $url. Say confirm." >/dev/null || fail "voice-merge-confirm: the read-back failed"
   voice_note_in "$case_dir" rec-c-2 " Confirm. " >/dev/null || fail "voice-merge-confirm: the confirmation was refused"
   run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
     || fail "voice-merge-confirm: the confirmed merge failed: $(cat "$case_dir/stderr")"
   assert_logged_gh_merge "$case_dir" 92 example/repo --squash
-  pass "under the confirm setting a voice merge waits for a read-back and a spoken confirm"
+
+  # The confirm was spent by that merge: a second merge needs its own
+  # read-back and confirm.
+  : > "$case_dir/gh.log"
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-confirm: one confirm must not authorize a second merge"
+  assert_grep 'a confirm already spent authorizes nothing more' "$case_dir/stderr" \
+    "voice-merge-confirm: the second merge was not refused by the voice rule: $(cat "$case_dir/stderr")"
+  refute_gh_merge "$case_dir" voice-merge-confirm-second
+  pass "under the confirm setting a voice merge waits for a read-back and a spoken confirm, which covers that one merge only"
 }
 
 test_merge_refuses_when_the_away_record_cannot_be_locked() {

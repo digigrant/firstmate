@@ -1132,15 +1132,19 @@ require_current_away_authority() {
 # A voice note never becomes merge authority on its own (bin/fm-inbox.sh
 # voice-gate owns the rule). Away authority and a task's yolo posture are
 # standing authority the captain gave at the keyboard beforehand; any other
-# merge acts on a new captain instruction.
+# merge acts on a new captain instruction. The early authority read only
+# checks; the read at the forge handoff spends a spoken confirmation, so one
+# confirm covers this one merge.
+FM_PR_VOICE_FINAL=false
 require_voice_authority() {
-  local standing=
+  local standing= check=--check
   if [ "$FM_PR_AWAY_POSTURE" = true ] \
     || [ "$(grep '^yolo=' "$META" | tail -1 | cut -d= -f2- || true)" = on ]; then
     standing=--standing
   fi
+  [ "$FM_PR_VOICE_FINAL" != true ] || check=
   FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$SCRIPT_DIR/fm-inbox.sh" voice-gate merge ${standing:+"$standing"} && return 0
+    "$SCRIPT_DIR/fm-inbox.sh" voice-gate merge ${standing:+"$standing"} ${check:+"$check"} && return 0
   echo "error: PR merge refused - voice cannot approve it under this home's voice-authority setting; nothing was merged" >&2
   return 1
 }
@@ -1347,6 +1351,7 @@ case "$PROVIDER" in
     # The away record is locked first, so this last presence and authority read
     # and the forge command below share one live-owner critical section.
     hold_away_record_for_merge || exit 1
+    FM_PR_VOICE_FINAL=true
     away_status=0
     require_current_away_authority || away_status=$?
     [ "$away_status" -eq 0 ] || exit "$away_status"
@@ -1402,6 +1407,7 @@ case "$PROVIDER" in
     # The away record is locked first, so this last presence and authority read
     # and the forge command below share one live-owner critical section.
     hold_away_record_for_merge || exit 1
+    FM_PR_VOICE_FINAL=true
     away_status=0
     require_current_away_authority || away_status=$?
     [ "$away_status" -eq 0 ] || exit "$away_status"

@@ -663,19 +663,37 @@ vid=$(run_inbox "$home" note --origin voice --request-id c-1 --json "merge it" |
 assert_equals "1" "$(gate_code "$home" merge)" "confirm without a read-back holds"
 run_inbox "$home" note --origin voice --request-id c-0 "confirm" >/dev/null
 assert_equals "1" "$(gate_code "$home" merge)" "a confirm with no read-back before it holds"
-run_inbox "$home" update --reply-to "$vid" --readback --voice "I will merge it. Say confirm." \
+run_inbox "$home" update --reply-to "$vid" --readback merge --voice "I will merge it. Say confirm." \
   "I will merge the pull request. Say confirm." >/dev/null || fail "the read-back should be sent"
 assert_equals "1" "$(gate_code "$home" merge)" "a read-back alone holds"
 run_inbox "$home" note --origin voice --request-id c-2 "yes do it" >/dev/null
 assert_equals "1" "$(gate_code "$home" merge)" "anything but an explicit confirm holds"
-run_inbox "$home" update --reply-to "$vid" --readback --voice "Say confirm." "Say confirm." >/dev/null
+run_inbox "$home" update --reply-to "$vid" --readback merge --voice "Say confirm." "Say confirm." >/dev/null
 run_inbox "$home" note --origin voice --request-id c-3 " Confirm! " >/dev/null
-assert_equals "valid" "$(phone_field "$home" confirmation)" "the spoken confirm is recognized"
-assert_equals "0" "$(gate_code "$home" merge)" "a read-back followed by confirm approves"
+assert_equals "valid:merge" "$(phone_field "$home" confirmation)" "the spoken confirm is recognized for the read-back action"
+assert_equals "1" "$(gate_code "$home" discard)" "a confirm never covers an action other than the one read back"
+set +e
+mismatch_err=$(run_inbox "$home" voice-gate land 2>&1 >/dev/null)
+set -e
+assert_contains "$mismatch_err" "answered a read-back of a merge" "the mismatch refusal names the action read back"
+assert_equals "0" "$(gate_code "$home" merge --check)" "a check does not spend the confirmation"
+assert_equals "valid:merge" "$(phone_field "$home" confirmation)" "the confirmation survives a check"
+assert_equals "0" "$(gate_code "$home" merge)" "a read-back followed by confirm approves that action"
+assert_equals "none" "$(phone_field "$home" confirmation)" "the approval spent the confirmation"
+assert_equals "1" "$(gate_code "$home" merge)" "the same action a second time needs a new read-back and confirm"
+assert_equals "1" "$(gate_code "$home" discard)" "another action after the one confirm is refused"
+set +e
+run_inbox "$home" update --reply-to "$vid" --readback --voice "x" "x" >/dev/null 2>&1
+bare_readback=$?
+set -e
+expect_code 1 "$bare_readback" "a read-back must name the one action it covers"
+run_inbox "$home" update --reply-to "$vid" --readback discard --voice "Say confirm." "Say confirm." >/dev/null
+run_inbox "$home" note --origin voice --request-id c-4 "confirm" >/dev/null
+assert_equals "0" "$(gate_code "$home" discard)" "a new read-back and confirm authorize the next action"
 printf 'bogus\n' > "$home/config/voice-authority"
 assert_equals "hold" "$(phone_field "$home" voice_authority)" "an unknown setting reads as hold"
 assert_equals "1" "$(gate_code "$home" merge)" "an unknown setting never approves by voice"
-pass "under confirm, only a read-back followed by a spoken confirm approves"
+pass "under confirm, a spoken confirm approves only the action read back, and only once"
 
 # The outbound feed: replies whenever opted in, escalations only while phone
 # updates are on, unique update ids, and a re-send that keeps its id.
