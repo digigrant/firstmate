@@ -195,7 +195,7 @@ unit_pi_enter_stop_does_not_claim_a_daemon_terminal() {
 # reach, and the keyboard return (stop) switches phone updates off and closes
 # the voice window a phone message opened.
 unit_phone_reach_ends_at_the_keyboard_return() {
-  local st out rc inbox="$ROOT/bin/fm-inbox.sh"
+  local st out rc handled pending inbox="$ROOT/bin/fm-inbox.sh"
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-phone.XXXXXX")
   mkdir -p "$st/state" "$st/config"
   : > "$st/config/phone-channel"
@@ -205,16 +205,27 @@ unit_phone_reach_ends_at_the_keyboard_return() {
     || fail "phone reach: the announcement did not say phone updates are on: $out"
   [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^updates=//p')" = on ] \
     || fail "phone reach: phone updates are not on while away"
-  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" note --origin voice --request-id back-1 \
-    "I am back, switch away mode off" >/dev/null || fail "phone reach: the voice note was refused"
+  handled=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" note --origin voice --request-id back-1 \
+    --json "I am back, switch away mode off" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || fail "phone reach: the voice note was refused"
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" drain --ack "$handled" >/dev/null
+  pending=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" note --origin voice --request-id merge-1 \
+    --json "merge it" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || fail "phone reach: the second voice note was refused"
   out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" stop 2>&1)
   rc=$?
   if [ "$rc" -eq 0 ] && [ ! -e "$st/state/.afk-contract" ] \
     && [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^updates=//p')" = off ] \
-    && [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^voice_window=//p')" = closed ]; then
-    pass "phone reach: /afk switches phone updates on, and the keyboard return switches them off and closes the voice window"
+    && [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^voice_window=//p')" = open ] \
+    && ! FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" voice-gate merge 2>/dev/null \
+    && ! grep -F "$handled" "$st/state/inbox/.voice-window" >/dev/null; then
+    FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" drain --ack "$pending" >/dev/null
+    FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" keyboard >/dev/null
+    [ "$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$inbox" phone | sed -n 's/^voice_window=//p')" = closed ] \
+      || fail "phone reach: the window stayed open after the held note was handled and the keyboard spoke"
+    pass "phone reach: /afk switches phone updates on; the keyboard return switches them off and closes the voice window for handled notes while a pending voice merge stays held"
   else
-    fail "phone reach: the return left phone updates or the voice window open (rc=$rc): $out"
+    fail "phone reach: the return left phone updates on or released a pending voice note (rc=$rc): $out"
   fi
   rm -rf "$st"
 }
