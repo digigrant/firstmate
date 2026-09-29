@@ -1156,7 +1156,7 @@ require_current_away_authority() {
 # confirm covers this one merge.
 FM_PR_VOICE_FINAL=false
 require_voice_authority() {
-  local standing= check=--check
+  local standing='' check=--check
   if [ "$FM_PR_AWAY_POSTURE" = true ] \
     || [ "$(grep '^yolo=' "$META" | tail -1 | cut -d= -f2- || true)" = on ]; then
     standing=--standing
