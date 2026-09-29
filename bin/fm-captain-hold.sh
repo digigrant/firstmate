@@ -72,8 +72,10 @@
 # `held:` bit, prove the captain owned it.
 # Before any of that, `answer` asks bin/fm-inbox.sh voice-gate, which owns the
 # phone channel's voice-authority rule, and records nothing when a voice note
-# would be answering the call; the keyed intake below is exempt, because its
-# words come from a bound captured source rather than from a voice note.
+# would be answering the call. The keyed intake below does not ask again: its
+# channels are bound captured sources, and bin/fm-send.sh, the one channel
+# whose answer text firstmate writes, asks voice-gate itself before it feeds
+# the intake.
 #
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
@@ -1019,8 +1021,8 @@ command_answer() {
   load_decision "$decision_file"
   # Firstmate writes these words from what the captain said, and a voice note
   # never answers a captain call on its own (bin/fm-inbox.sh voice-gate owns the
-  # rule). The keyed intake below is exempt: its words come from a bound
-  # captured source, never from a voice note.
+  # rule). The keyed intake does not ask again: its channels are bound captured
+  # sources, and bin/fm-send.sh asks voice-gate itself before feeding it.
   if [ "${FM_CAPTAIN_HOLD_KEYED_INTAKE:-}" != 1 ] \
     && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-inbox.sh" voice-gate decide; then
     fail "captain-held task $id was not answered: voice cannot answer a captain call under this home's voice-authority setting"

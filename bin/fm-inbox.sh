@@ -107,8 +107,12 @@
 #   runs `keyboard` before acting on the captain's next unmarked keyboard
 #   message outside away mode while the window is open, and the away-mode
 #   return runs it after archiving the away record (bin/fm-afk-launch.sh
-#   stop). A voice note never closes it, and firstmate never runs `keyboard`
-#   because a voice note asked.
+#   stop). `keyboard` closes the window only for voice notes already
+#   acknowledged: a voice note still pending in the inbox keeps its entry, so
+#   an unrelated keyboard message never releases a voice approval nobody has
+#   handled, and the window closes once no pending voice note remains. A voice
+#   note never closes it, and firstmate never runs `keyboard` because a voice
+#   note asked.
 #
 #   `voice-gate` is the one enforcement point firstmate's guarded scripts call
 #   before they consume captain authority: bin/fm-pr-merge.sh (merge),
@@ -1349,6 +1353,11 @@ cmd_voice_gate() {
   voice_window_scan
   [ "$VOICE_WINDOW_OPEN" -eq 1 ] || return 0
   setting=$(voice_authority)
+  # Standing authority never depends on a spoken confirmation, so it neither
+  # spends one nor trips on one meant for another action.
+  if [ "$standing" -eq 1 ] && [ -z "$VOICE_WINDOW_PENDING" ]; then
+    return 0
+  fi
   noun=$(voice_gate_noun "$action")
   if [ "$setting" = confirm ] && [ "$VOICE_WINDOW_CONFIRMED" -eq 1 ]; then
     if [ "$VOICE_WINDOW_CONFIRMED_ACTION" = "$action" ] \
@@ -1388,21 +1397,40 @@ cmd_voice_gate() {
 
 cmd_keyboard() {
   [ "$#" -eq 0 ] || die "usage: fm-inbox.sh keyboard"
-  local notes="" kind at ref flag
+  local closed="" held="" kind at ref flag tmp status=0
   [ -e "$VOICE_WINDOW" ] || { printf 'keyboard: no voice window was open\n'; return 0; }
   load_wake_lib || die "closing the voice window needs $FM_ROOT/bin/fm-wake-lib.sh"
   fm_lock_acquire_wait "$VOICE_LOCK" || die "could not lock the voice window"
-  if [ -f "$VOICE_WINDOW" ]; then
+  tmp=$(mktemp "$INBOX/.voice-window.XXXXXX") || status=1
+  if [ "$status" -eq 0 ] && [ -f "$VOICE_WINDOW" ]; then
+    # Keep only the entries of voice notes still pending; read-backs and spent
+    # confirmations belong to the conversation the keyboard just ended.
     while IFS=$'\t' read -r kind at ref flag || [ -n "$kind" ]; do
-      [ "$kind" = voice ] && notes="${notes:+$notes }$ref"
+      [ "$kind" = voice ] || continue
+      if valid_note_id "$ref" && [ -f "$INBOX/$ref.note" ]; then
+        printf '%s\t%s\t%s\t%s\n' "$kind" "$at" "$ref" "$flag" >>"$tmp" || status=1
+        case " $held " in *" $ref "*) ;; *) held="${held:+$held }$ref" ;; esac
+      else
+        case " $closed " in *" $ref "*) ;; *) closed="${closed:+$closed }$ref" ;; esac
+      fi
     done <"$VOICE_WINDOW"
   fi
-  if ! rm -f "$VOICE_WINDOW"; then
-    fm_lock_release "$VOICE_LOCK"
-    die "could not close the voice window at $VOICE_WINDOW"
+  if [ "$status" -eq 0 ]; then
+    if [ -n "$held" ]; then
+      mv "$tmp" "$VOICE_WINDOW" || status=1
+    else
+      rm -f "$tmp" "$VOICE_WINDOW" || status=1
+    fi
   fi
+  [ "$status" -eq 0 ] || rm -f "$tmp"
   fm_lock_release "$VOICE_LOCK"
-  printf 'keyboard: closed the voice window (voice notes: %s)\n' "${notes:-none}"
+  [ "$status" -eq 0 ] || die "could not close the voice window at $VOICE_WINDOW"
+  if [ -n "$held" ]; then
+    printf 'keyboard: closed the voice window for handled voice notes (%s); still held for the keyboard until handled: %s\n' \
+      "${closed:-none}" "$held"
+  else
+    printf 'keyboard: closed the voice window (voice notes: %s)\n' "${closed:-none}"
+  fi
 }
 
 # Append one feed entry, or re-append an existing one with --resend. The caller
