@@ -3487,6 +3487,50 @@ test_voice_merge_it_is_held_for_the_keyboard() {
   pass "a voice-tagged \"merge it\" is held for the keyboard under the default setting, while keyboard, away, and yolo authority still merge"
 }
 
+# A keyboard message never releases a voice approval nobody has handled: an
+# unrelated keyboard message, or the away-mode return, leaves a pending voice
+# "merge it" held, and the merge stays refused until that note is handled.
+test_pending_voice_merge_survives_the_keyboard() {
+  local case_dir rc url head note
+  head=c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3
+  url=https://github.com/example/repo/pull/93
+
+  case_dir=$(make_case voice-merge-keyboard)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  note=$(voice_note_in "$case_dir" rec-k-1 "merge it") || fail "voice-merge-keyboard: the voice note was refused"
+  inbox_in "$case_dir" keyboard >/dev/null || fail "voice-merge-keyboard: keyboard failed"
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-keyboard: an unrelated keyboard message released a pending voice merge"
+  assert_grep "voice note $note is still pending" "$case_dir/stderr" \
+    "voice-merge-keyboard: the refusal did not name the still-pending voice note"
+  refute_gh_merge "$case_dir" voice-merge-keyboard
+  inbox_in "$case_dir" drain --ack "$note" >/dev/null || fail "voice-merge-keyboard: ack failed"
+  inbox_in "$case_dir" keyboard >/dev/null || fail "voice-merge-keyboard: keyboard failed"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-keyboard: the keyboard-approved merge failed once the note was handled: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 93 example/repo --squash
+
+  case_dir=$(make_case voice-merge-return)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" "$head"
+  : > "$case_dir/home/config/phone-channel"
+  write_away_record "$case_dir"
+  note=$(voice_note_in "$case_dir" rec-r-1 "merge it") || fail "voice-merge-return: the voice note was refused"
+  FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" "$ROOT/bin/fm-afk-launch.sh" stop \
+    > "$case_dir/return.out" 2>&1 || fail "voice-merge-return: the keyboard return failed: $(cat "$case_dir/return.out")"
+  [ ! -e "$case_dir/state/.afk-contract" ] || fail "voice-merge-return: the away record was not archived"
+  rc=0
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "voice-merge-return: the away return released a pending voice merge"
+  assert_grep "voice note $note is still pending" "$case_dir/stderr" \
+    "voice-merge-return: the refusal did not name the still-pending voice note"
+  refute_gh_merge "$case_dir" voice-merge-return
+  pass "a pending voice \"merge it\" stays refused across an unrelated keyboard message and the away return"
+}
+
 # Under read-back-and-confirm, voice approves only after the exact action is
 # read back and the captain's next voice note is an explicit "confirm".
 test_voice_merge_needs_a_readback_and_confirm_under_confirm() {
@@ -4017,6 +4061,7 @@ test_a_record_made_unreadable_before_the_merge_refuses_it
 test_merge_refuses_when_the_away_record_cannot_be_locked
 test_voice_merge_it_is_held_for_the_keyboard
 test_voice_merge_needs_a_readback_and_confirm_under_confirm
+test_pending_voice_merge_survives_the_keyboard
 test_allow_red_refused_on_gitlab
 test_required_check_that_never_reported_refuses
 test_required_checks_reported_and_green_merge

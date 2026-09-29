@@ -656,6 +656,23 @@ set -e
 expect_code 2 "$bad_action" "an unknown gate action is a usage error"
 pass "under hold, voice approves nothing until the keyboard closes the voice window"
 
+# The keyboard never releases a voice note still pending: its entry stays in
+# the window until the note is handled, and only then does a keyboard close it.
+home=$(phone_home phone-keyboard-held)
+handled=$(run_inbox "$home" note --origin voice --request-id k-1 --json "what is running" | json_get id)
+run_inbox "$home" drain --ack "$handled" >/dev/null
+held=$(run_inbox "$home" note --origin voice --request-id k-2 --json "merge it" | json_get id)
+kb_out=$(run_inbox "$home" keyboard)
+assert_contains "$kb_out" "still held for the keyboard until handled: $held" "keyboard names the voice note it keeps"
+assert_equals "open" "$(phone_field "$home" voice_window)" "a pending voice note keeps the window open"
+assert_no_grep "$handled" "$home/state/inbox/.voice-window" "the handled note's entry is closed"
+assert_equals "1" "$(gate_code "$home" merge)" "the pending voice merge is still refused after the keyboard"
+run_inbox "$home" drain --ack "$held" >/dev/null
+assert_contains "$(run_inbox "$home" keyboard)" "closed the voice window" "keyboard closes the window once the note is handled"
+assert_equals "closed" "$(phone_field "$home" voice_window)" "no pending voice note leaves the window closed"
+assert_equals "0" "$(gate_code "$home" merge)" "the keyboard approval passes once nothing voice is pending"
+pass "the keyboard closes the voice window only for voice notes already handled"
+
 # Under confirm, a read-back followed by an explicit spoken confirm approves;
 # anything else, and any setting typo, holds.
 home=$(phone_home phone-confirm confirm)
@@ -690,6 +707,18 @@ expect_code 1 "$bare_readback" "a read-back must name the one action it covers"
 run_inbox "$home" update --reply-to "$vid" --readback discard --voice "Say confirm." "Say confirm." >/dev/null
 run_inbox "$home" note --origin voice --request-id c-4 "confirm" >/dev/null
 assert_equals "0" "$(gate_code "$home" discard)" "a new read-back and confirm authorize the next action"
+# Standing authority neither spends nor trips on a confirmation for another
+# action once no voice note is pending.
+run_inbox "$home" update --reply-to "$vid" --readback discard --voice "Say confirm." "Say confirm." >/dev/null
+cid=$(run_inbox "$home" note --origin voice --request-id c-5 --json "confirm" | json_get id)
+for pending_id in $(run_inbox "$home" receipts --all-pending | python3 -c 'import json,sys
+print(" ".join(r["id"] for r in json.load(sys.stdin)["pending"]))'); do
+  run_inbox "$home" drain --ack "$pending_id" >/dev/null
+done
+assert_equals "0" "$(gate_code "$home" merge --standing)" "a standing merge does not trip on a confirm for a discard"
+assert_equals "valid:discard" "$(phone_field "$home" confirmation)" "a standing merge does not spend the captain's confirm"
+assert_equals "0" "$(gate_code "$home" discard)" "the confirmed discard still proceeds after the standing merge"
+[ -n "$cid" ] || fail "the confirm note had no id"
 printf 'bogus\n' > "$home/config/voice-authority"
 assert_equals "hold" "$(phone_field "$home" voice_authority)" "an unknown setting reads as hold"
 assert_equals "1" "$(gate_code "$home" merge)" "an unknown setting never approves by voice"

@@ -3972,6 +3972,21 @@ test_voice_note_cannot_answer_a_captain_call_or_discard() {
   show=$(tasks_in "$home" show sample-voice-call --full)
   assert_contains "$show" "held: yes" "the voice-backed answer released the captain call"
 
+  # The same answer relayed to a worker through fm-send's keyed answer path is
+  # refused before anything is delivered.
+  fm_write_meta "$home/state/voice-worker.meta" "window=sess:fm-voice-worker" "kind=ship"
+  set +e
+  out=$(env PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_SEND_LOG="$home/send.log" FM_SEND_SETTLE=0 \
+    "$ROOT/bin/fm-send.sh" voice-worker --resolve-key sample-voice-call "yes, ship the release" 2>&1)
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "a voice-backed decision answer through fm-send must be refused"
+  assert_contains "$out" "which voice cannot do; nothing was sent" "the fm-send refusal did not name the voice rule: $out"
+  [ ! -e "$home/state/voice-worker.inbox" ] || fail "the refused voice-backed answer still reached the worker"
+  show=$(tasks_in "$home" show sample-voice-call --full)
+  assert_contains "$show" "held: yes" "the fm-send answer released the captain call"
+
   out=$(printf 'sample-board-call\tthe wide layout\tLayout\trelease\n' \
     | run_captain "$home" answers --source "board fixture" 2>&1) \
     || fail "the keyed intake was refused while a voice note was pending: $out"
@@ -3995,7 +4010,7 @@ test_voice_note_cannot_answer_a_captain_call_or_discard() {
     || fail "the keyboard answer was refused after the keyboard closed the voice window"
   show=$(tasks_in "$home" show sample-voice-call --full)
   assert_not_contains "$show" "hold_kind: captain" "the keyboard answer did not release the call"
-  pass "a voice note never answers a captain call or authorizes a discard, while the keyed intake and the keyboard still do"
+  pass "a voice note never answers a captain call, directly or through fm-send, or authorizes a discard, while the keyed intake and the keyboard still do"
 }
 
 test_released_merge_passes_the_entrypoint_and_lands() {
