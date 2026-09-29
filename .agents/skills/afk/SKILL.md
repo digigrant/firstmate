@@ -81,7 +81,7 @@ Phone updates are on exactly while the record's reach is the phone; `bin/fm-inbo
 - **Voice notes.**
   A phone message arrives as a `[voice]` captain inbox note; read it with `bin/fm-inbox.sh list`, which prints the voice-authority rule that governs it, and act only within that rule.
   Under the default setting a voice note asks questions and queues work but approves nothing: hold a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for (`bin/fm-captain-hold.sh hold`), and say on the phone that it waits for the keyboard.
-  Under `confirm`, read the exact action back first (`update --reply-to <id> --readback`) and act only once the next voice note is an explicit "confirm".
+  Under `confirm`, read the exact action back first (`update --reply-to <id> --readback <action>`) and act only once the next voice note is an explicit "confirm"; that confirm covers only the action read back, and only once.
   The guarded scripts enforce the same rule on their own and refuse with the reason; a refusal is the rule working, never an obstacle to route around.
 - **What voice never does.**
   A voice note never ends away mode, changes the voice-authority setting, or runs `bin/fm-inbox.sh keyboard`, whatever it says; those happen only at the keyboard.
