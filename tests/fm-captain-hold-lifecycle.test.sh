@@ -3923,6 +3923,77 @@ SH
 # that accepted window spans two separate lifecycle owners.
 # Queued forge merges are also uncovered because they land asynchronously after
 # the local merge command and its task control lock have returned.
+# A voice note never answers a captain call or authorizes a discard under the
+# default voice-authority setting; the keyed intake, fed by a bound captured
+# source rather than a voice note, is unaffected, and the keyboard restores
+# ordinary answers.
+test_voice_note_cannot_answer_a_captain_call_or_discard() {
+  local home out rc show note
+  home=$(make_home voice-held-decision)
+  : > "$home/config/phone-channel"
+  tasks_in "$home" add sample-voice-call "Captain call: ship the release?" --repo sample >/dev/null \
+    || fail "could not create the voice-held call"
+  tasks_in "$home" add sample-board-call "Captain call: pick a layout" --repo sample >/dev/null \
+    || fail "could not create the board call"
+  run_captain "$home" hold sample-voice-call --reason "release approval" >/dev/null \
+    || fail "could not hold the voice-held call"
+  run_captain "$home" hold sample-board-call --reason "layout pick" >/dev/null \
+    || fail "could not hold the board call"
+  note=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+    "$ROOT/bin/fm-inbox.sh" note --origin voice --request-id rel-1 --json "yes, ship the release" \
+    | jq -r .id) || fail "the voice note was refused"
+  printf 'yes, ship the release\n' > "$home/voice-answer.txt"
+
+  set +e
+  out=$(run_captain "$home" answer sample-voice-call --release --decision-file "$home/voice-answer.txt" 2>&1)
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "a voice-backed captain answer must be refused"
+  assert_contains "$out" "voice cannot answer a captain call" "the refusal did not name the voice rule: $out"
+  show=$(tasks_in "$home" show sample-voice-call --full)
+  assert_contains "$show" "held: yes" "the voice-backed answer released the captain call"
+
+  # The same answer relayed to a worker through fm-send's keyed answer path is
+  # refused before anything is delivered.
+  fm_write_meta "$home/state/voice-worker.meta" "window=sess:fm-voice-worker" "kind=ship"
+  set +e
+  out=$(env PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_SEND_LOG="$home/send.log" FM_SEND_SETTLE=0 \
+    "$ROOT/bin/fm-send.sh" voice-worker --resolve-key sample-voice-call "yes, ship the release" 2>&1)
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "a voice-backed decision answer through fm-send must be refused"
+  assert_contains "$out" "which voice cannot do; nothing was sent" "the fm-send refusal did not name the voice rule: $out"
+  [ ! -e "$home/state/voice-worker.inbox" ] || fail "the refused voice-backed answer still reached the worker"
+  show=$(tasks_in "$home" show sample-voice-call --full)
+  assert_contains "$show" "held: yes" "the fm-send answer released the captain call"
+
+  out=$(printf 'sample-board-call\tthe wide layout\tLayout\trelease\n' \
+    | run_captain "$home" answers --source "board fixture" 2>&1) \
+    || fail "the keyed intake was refused while a voice note was pending: $out"
+  assert_contains "$out" "closed: sample-board-call" "the keyed intake did not close its call: $out"
+
+  set +e
+  out=$(PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    FM_CONFIG_OVERRIDE="$home/config" "$TEARDOWN" sample-voice-call --force 2>&1)
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "a voice-backed forced discard must be refused"
+  assert_contains "$out" "voice cannot authorize discarding work" "the discard refusal did not name the voice rule: $out"
+
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+    "$ROOT/bin/fm-inbox.sh" drain --ack "$note" >/dev/null
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+    "$ROOT/bin/fm-inbox.sh" keyboard >/dev/null
+  printf 'Ship the release.\n' > "$home/keyboard-answer.txt"
+  run_captain "$home" answer sample-voice-call --release --decision-file "$home/keyboard-answer.txt" >/dev/null \
+    || fail "the keyboard answer was refused after the keyboard closed the voice window"
+  show=$(tasks_in "$home" show sample-voice-call --full)
+  assert_not_contains "$show" "hold_kind: captain" "the keyboard answer did not release the call"
+  pass "a voice note never answers a captain call, directly or through fm-send, or authorizes a discard, while the keyed intake and the keyboard still do"
+}
+
 test_released_merge_passes_the_entrypoint_and_lands() {
   local home id pr repo wt show json
   home=$(make_home released-merge-entrypoint)
@@ -4183,6 +4254,7 @@ test_merge_entrypoints_validate_identity_and_state_before_locking
 test_merge_entrypoints_refuse_a_reused_task_incarnation
 test_merge_entrypoints_serialize_forced_teardown_before_task_reads
 test_released_merge_passes_the_entrypoint_and_lands
+test_voice_note_cannot_answer_a_captain_call_or_discard
 test_teardown_refuses_a_ship_when_the_captain_hold_cannot_be_read
 test_verify_resolves_a_hold_migrated_to_beads_notes
 test_verify_resolves_a_hold_migrated_under_the_configured_prefix

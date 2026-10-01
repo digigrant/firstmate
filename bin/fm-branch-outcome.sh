@@ -78,7 +78,9 @@
 # Usage:
 #   fm-branch-outcome.sh append --task <id> --verdict routine|captain \
 #       --summary <text> [--wake <text>] [--silent true|false]
-#     Append one outcome record; prints the assigned seq.
+#     Append one outcome record; prints the assigned seq. While phone updates
+#     are on, a captain record's summary is also sent to the phone channel's
+#     feed (bin/fm-inbox.sh update, which owns when phone updates are on).
 #   fm-branch-outcome.sh unread
 #     Print every unread record (raw JSONL). Exit 0 with no output when none.
 #   fm-branch-outcome.sh mark-read --through <seq>
@@ -557,6 +559,16 @@ case "$CMD" in
       exit 1
     fi
     fm_lock_release "$LOCK"
+    # Phone channel (bin/fm-inbox.sh): while phone updates are on, a captain
+    # outcome is also an escalation for the phone, with the voice version left
+    # to the hub's rewrite. The store already holds it, so a feed failure is
+    # reported and never undoes the append; with phone updates off, `update`
+    # sends nothing.
+    if [ "$VERDICT" = captain ] && [ -e "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/phone-channel" ]; then
+      printf '%s' "$SUMMARY" | FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+        "$SCRIPT_DIR/fm-inbox.sh" update --no-voice - >/dev/null \
+        || echo "actionable: captain outcome $SEQ is stored but did not reach the phone feed" >&2
+    fi
     printf '%s\n' "$SEQ"
     ;;
   unread)
