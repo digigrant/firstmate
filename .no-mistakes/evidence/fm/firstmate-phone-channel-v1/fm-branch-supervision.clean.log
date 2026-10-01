@@ -1,0 +1,39 @@
+ok - branch prompt is byte-stable across homes, cwd, timezone, and time, above the cache floor
+ok - outcome store is append-only and refuses sequence reuse after a torn tail
+ok - outcome append refreshes a bounded, verbatim display tail of the newest rows without moving the cursor
+ok - the display tail keeps only whole newest rows within its 1 MiB budget, never shortening one
+ok - outcome seed-tail writes an absent display tail from a valid store's newest rows without moving a marker, and leaves an existing one to append
+ok - seed-tail validates and publishes only a bounded newest window, not old malformed history
+ok - while phone updates are on, only captain outcomes reach the phone feed
+ok - routine task and fleet no-change outcomes stay stored and silent captain outcomes are refused
+ok - startup replay cannot advance the cursor across an unrendered captain outcome
+ok - malformed and ahead-of-store cursor state fail closed before any outcome can be skipped
+ok - cursor advancement refuses to legitimize an ahead processed marker
+ok - middle sequence conflicts fail closed for every store read and append
+ok - outcome lookup returns exact sequence rows and distinguishes missing receipts
+ok - outcome stores require terminated single-line JSON records
+ok - the processed marker is sequence-bound, never ahead of the read cursor, never backwards, and never adopts delivered history
+ok - outcome store: present shows each routine row once and each captain row until it is acknowledged
+ok - outcome store: present and unprocessed name each captain row's recorded age without writing it
+ok - lease exclusivity, same-actor refresh, release, staleness, and sweep hold
+ok - fm-control and fm-teardown refuse the other actor's live lease and pass through otherwise
+ok - PR merge, local landing, and new-task spawn refuse the branch actor and spare main
+ok - a home without a live branch lease takes no lock and clears leftover leases in any calling context
+ok - an unmarked main honors a live branch lease across processes and ignores a previous session's
+ok - a lease file makes an unmarked guard exclude a concurrent claim for the complete mutation
+ok - a host home's unmarked main excludes the host's first claim for its whole mutation, and other homes take no lock
+ok - lease liveness requires an exact valid session-lock pid
+ok - concurrent stale-lease claims serialize so exactly one actor succeeds
+ok - guard stale cleanup cannot race with or delete a newer lease claim
+ok - lease guard excludes a concurrent actor for the complete mutation
+ok - a claim naming the other actor fails loudly instead of silently impersonating it
+ok - release commands authorize the caller and bulk release drops only that actor's leases
+ok - the branch cannot force a teardown or bypass fm-control for a relaunch
+ok - the away-posture record relocates the PR merge and a spawn under the spend cap to the branch, never local landing, and only while confirmed, valid, and away
+ok - relocated branch spawn admits only already-queued dispatchable work, including on a manual-backend home
+ok - the away spend cap is rechecked under the task-set lock so concurrent spawns cannot both publish
+ok - a quiet-mode record never caps a present captain's spawn, while the away record's cap still binds
+
+real	0m23.253s
+user	0m15.720s
+sys	0m7.732s

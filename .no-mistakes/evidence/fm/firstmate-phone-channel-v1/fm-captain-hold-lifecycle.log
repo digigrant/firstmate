@@ -1,0 +1,223 @@
+not ok - the pre-policy omission shape was not reproduced: {
+  "schema": "fm-bearings.v1",
+  "home": "dev/firstmate",
+  "generated": "2026-07-14T12:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 17,
+    "checked": 17,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 17
+    },
+    "complete": true,
+    "proven_clear": true,
+    "unmeasured_homes": 0,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [
+    {
+      "id": "firstmate-phone-channel",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "firstmate",
+      "name": "firstmate: connect the inbox and away mode to Magic Conch",
+      "doing": "backend target gone: default:w1:p5"
+    },
+    {
+      "id": "firstmate-phone-channel-v0",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "firstmate",
+      "name": "firstmate: phone channel for Magic Conch v0.0 (voice never approves)",
+      "doing": "worktree gone (torn down?)"
+    },
+    {
+      "id": "firstmate-phone-channel-v1",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "firstmate",
+      "name": "firstmate: phone channel for Magic Conch v0.0 (resume after rebuild)",
+      "doing": "resolved [at=1790882085] [key=nm-01M3WAYP3B21DK2K8E4HS88NSN-test]: answered: fix test-1 (r…"
+    },
+    {
+      "id": "mc-android-network",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "magic-conch",
+      "name": "Magic Conch: Android real transport and pairing",
+      "doing": "worktree gone (torn down?)"
+    },
+    {
+      "id": "mc-android-network-2",
+      "kind": "ship",
+      "state": "blocked",
+      "repo": "magic-conch",
+      "name": "Magic Conch: Android real transport and pairing (resume after rebuild)",
+      "doing": "run 01M3WBY3D1XYG1CQVTA7D7KZEW (on ours-merge fd19397 as instructed; review fixed 1 real b…"
+    },
+    {
+      "id": "mc-connector",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "magic-conch",
+      "name": "Magic Conch: firstmate connector",
+      "doing": "backend target gone: default:wB:p2"
+    },
+    {
+      "id": "mc-design-capture-and-talk-button",
+      "kind": "ship",
+      "state": "unknown",
+      "repo": "magic-conch",
+      "name": "Magic Conch: design the recording capture and the tap-to-toggle talk b…",
+      "doing": "worktree gone (torn down?)"
+    }
+  ],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "mc-message-review-design",
+      "key": "mc-message-review-design",
+      "verb": "captain-hold",
+      "summary": "Magic Conch: design the message review step before a spoken message is sent: Grilling sess…",
+      "owner": "(main)"
+    },
+    {
+      "id": "mc-ci-test-scope",
+      "key": "mc-ci-test-scope",
+      "verb": "captain-hold",
+      "summary": "Magic Conch/devenv: when should tests actually run?: Grilling session to design what tests…",
+      "owner": "(main)"
+    },
+    {
+      "id": "mc-voice-commands-design",
+      "key": "mc-voice-commands-design",
+      "verb": "captain-hold",
+      "summary": "Magic Conch: design the wake word and voice commands: Grilling session, flagged during the…",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [
+    {
+      "id": "mc-design-capture-and-talk-button-2",
+      "what": "Magic Conch: design capture and talk button doc update (resume after r…",
+      "artifact": "-",
+      "owner": "(main)"
+    },
+    {
+      "id": "mc-connector-2",
+      "what": "Magic Conch: firstmate connector (resume after rebuild)",
+      "artifact": "-",
+      "owner": "(main)"
+    },
+    {
+      "id": "devenv-sbx-policy-network",
+      "what": "devenv: bake required sandbox network policy allowances into devenv se…",
+      "artifact": "-",
+      "owner": "(main)"
+    },
+    {
+      "id": "devenv-hub-install",
+      "what": "devenv: install and run the Magic Conch hub on Linux hosts",
+      "artifact": "https://github.com/digigrant/devenv/pull/12",
+      "owner": "(main)"
+    },
+    {
+      "id": "mc-readme-status",
+      "what": "Magic Conch: update the root README status",
+      "artifact": "https://github.com/digigrant/magic-conch/pull/7",
+      "owner": "(main)"
+    },
+    {
+      "id": "mc-android-talk-toggle",
+      "what": "Magic Conch: talk button tap-to-toggle by default, hold optional",
+      "artifact": "-",
+      "owner": "(main)"
+    }
+  ],
+  "gates": [
+    {
+      "id": "mc-hub-capture",
+      "title": "Magic Conch: hub recording capture for real-conditions test …",
+      "blocked_by": "mc-design-capture-and-talk-button",
+      "reason": "-",
+      "owner": "(main)",
+      "filed": "2026-09-29"
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "unhealthy_endpoints": [
+    {
+      "id": "firstmate-phone-channel",
+      "backend": "herdr",
+      "target": "default:w1:p5",
+      "exists": false,
+      "agent": "not_checked"
+    },
+    {
+      "id": "firstmate-phone-channel-v0",
+      "backend": "herdr",
+      "target": "default:wA:p2",
+      "exists": false,
+      "agent": "not_checked"
+    },
+    {
+      "id": "mc-android-network",
+      "backend": "herdr",
+      "target": "default:w5:p2",
+      "exists": false,
+      "agent": "not_checked"
+    },
+    {
+      "id": "mc-connector",
+      "backend": "herdr",
+      "target": "default:wB:p2",
+      "exists": false,
+      "agent": "not_checked"
+    }
+  ],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "landed per-home capped at 6 for 1 home(s)",
+      "reveal": "--all-landed"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}
+
+real	0m11.339s
+user	0m1.582s
+sys	0m0.724s
