@@ -150,8 +150,7 @@ FM_AFK_CONTRACT_VERSION=2
 # Older record versions this script still reads (never writes).
 FM_AFK_CONTRACT_READABLE_VERSIONS="1 2"
 FM_AFK_CONTRACT_REACH_ANNOUNCED='No phone channel is configured; anything that needs you waits for your return.'
-FM_AFK_CONTRACT_REACH_PHONE_HOLD='Phone updates are on: replies, decisions, and anything else that needs you come to your phone; by voice you can ask questions and queue work, approvals wait for the keyboard, and your first keyboard message switches phone updates off.'
-FM_AFK_CONTRACT_REACH_PHONE_CONFIRM='Phone updates are on: replies, decisions, and anything else that needs you come to your phone; you can approve by voice once the exact action is read back to you and you say "confirm", and your first keyboard message switches phone updates off.'
+FM_AFK_CONTRACT_REACH_PHONE='Phone updates are on: replies, decisions, and anything else that needs you come to your phone; by voice you can ask questions and queue work, approvals wait for the keyboard, and your first keyboard message switches phone updates off.'
 FM_AFK_CONTRACT_SPEND_DEFAULT=4
 FM_AFK_CONTRACT_QUIET_HOLDS_NOTHING='you are present, so nothing waits for your return: every action you ask for, a local landing or a merge included, proceeds now under ordinary attended authority, and quiet mode changes only which updates reach this conversation.'
 # Generous against the longest legitimate holder, a merge waiting on the forge,
@@ -265,10 +264,10 @@ fm_afk_contract_validate_iso() {  # <ts>
 }
 
 # Resolve the reach profile for a new record into REACH and REACH_ANNOUNCED.
-# bin/fm-inbox.sh owns whether the phone channel is configured and what the
-# voice-authority setting is; a home that has not opted in keeps hold-for-return.
+# bin/fm-inbox.sh owns whether the phone channel is configured and what voice
+# may approve; a home that has not opted in keeps hold-for-return.
 fm_afk_contract_reach_resolve() {
-  local phone opted authority
+  local phone opted
   REACH=none
   REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_ANNOUNCED
   if ! phone=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$FM_AFK_CONTRACT_STATE" \
@@ -278,13 +277,8 @@ fm_afk_contract_reach_resolve() {
   fi
   opted=$(printf '%s\n' "$phone" | sed -n 's/^opted_in=//p')
   [ "$opted" = 1 ] || return 0
-  authority=$(printf '%s\n' "$phone" | sed -n 's/^voice_authority=//p')
   REACH=phone
-  if [ "$authority" = confirm ]; then
-    REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE_CONFIRM
-  else
-    REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE_HOLD
-  fi
+  REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE
 }
 
 # Render a whole record on stdout.
