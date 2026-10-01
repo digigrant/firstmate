@@ -663,14 +663,6 @@ if [ -n "$RESOLVE_KEYS" ]; then
   if [ "$RESOLVE_IS_DECISION" -eq 1 ]; then
     fm_lease_forbid_branch "decision answer (fm-send --resolve-key)" --away-relocated
   fi
-  # Answering a captain-held task is a captain decision, which a voice note
-  # never makes on its own (bin/fm-inbox.sh voice-gate owns the rule); refuse
-  # before anything is delivered.
-  if [ -n "$RESOLVE_HOLD_KEYS" ] && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$SCRIPT_DIR/fm-inbox.sh" voice-gate decide; then
-    echo "error: --resolve-key would answer the captain-held task ${RESOLVE_HOLD_KEYS} under this home's voice-authority setting, which voice cannot do; nothing was sent" >&2
-    exit 1
-  fi
   # Refuse before send when a named status-log key cannot actually close: a
   # reserved key with an answered: note is a silent no-op in the fold.
   # The cap bounds the line that is actually APPENDED, and the self-announced

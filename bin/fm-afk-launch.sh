@@ -10,8 +10,7 @@
 # the captain who typed it may not look at the screen again: `enter` records the
 # away words verbatim straight into state/.afk-contract in the same turn, with no
 # separate confirmation step, then prints the entry announcement (hold-for-return
-# only, or phone updates on where the home opted into the phone channel; a
-# quiet entry's says nothing is held) and the
+# only: no phone channel exists; a quiet entry's says nothing is held) and the
 # read-back, which is informational and never waits for a go
 # (bin/fm-afk-contract.sh owns the record schema; the words are the whole
 # mandate and no script parses them). The record is the posture in every
@@ -48,9 +47,7 @@
 # daemon runs ends quiet mode as `stop` does, so no quiet record outlives its
 # daemon to park a present captain's main.
 # `stop` (the return, driven by bin/fm-afk-return.sh) shuts the daemon down,
-# clears state/.afk last, archives the record under state/afk-contracts/, and,
-# because the return is the captain at the keyboard, closes the phone channel's
-# voice window (bin/fm-inbox.sh keyboard).
+# clears state/.afk last, and archives the record under state/afk-contracts/.
 #
 # Why the terminal lifecycle exists (docs/herdr-backend.md "Away-mode daemon terminal launch"):
 # bin/fm-afk-start.sh execs the supervise daemon in the FOREGROUND of whatever
@@ -89,9 +86,8 @@
 #                              cleanup flushes WHILE state/.afk is still present,
 #                              wait for it, close a recorded non-native terminal
 #                              by exact id, clear state/.afk, then archive the
-#                              record last and close the voice window. A Pi or
-#                              native entry that never launched a daemon
-#                              reports that none was running.
+#                              record last. A Pi or native entry that never
+#                              launched a daemon reports that none was running.
 #   fm-afk-launch.sh reconcile Close a recorded-but-dead daemon terminal by exact
 #                              id and drop the record (recovery after a crash).
 #   fm-afk-launch.sh quiet-check
@@ -876,14 +872,6 @@ fm_afk_launch_stop() {
       fm_afk_launch_log "failed to archive the away-posture record; it still stands"
       result=1
     fi
-  fi
-  # (5) The return is the captain at the keyboard, so it also closes the phone
-  # channel's voice window (bin/fm-inbox.sh owns it). A failure only leaves the
-  # window open, where every refusal names the command that closes it.
-  if [ "$result" -eq 0 ] \
-    && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$FM_AFK_LAUNCH_STATE" \
-      "$FM_AFK_LAUNCH_DIR/fm-inbox.sh" keyboard >/dev/null; then
-    fm_afk_launch_log "the voice window could not be closed; run bin/fm-inbox.sh keyboard"
   fi
   if [ "$result" -eq 0 ]; then
     if [ "$closed_daemon_terminal" -eq 1 ]; then

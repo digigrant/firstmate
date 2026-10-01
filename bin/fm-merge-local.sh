@@ -13,9 +13,7 @@
 # The task's existing per-task control lock serializes the captain-hold check
 # through that fast-forward. A still-held or unreadable row refuses before the
 # merge, so a captain approval must be recorded as an `answer --release` before
-# this entrypoint is invoked. bin/fm-inbox.sh voice-gate, the owner of the
-# phone channel's voice-authority rule, is asked next, with yolo=on as standing
-# authority. The lock ends when the fast-forward returns;
+# this entrypoint is invoked. The lock ends when the fast-forward returns;
 # docs/captain-hold-lifecycle.md owns the accepted merge-to-cleanup residual.
 # Usage: fm-merge-local.sh <task-id>
 set -eu
@@ -137,15 +135,6 @@ case "$hold_status" in
     exit 1
     ;;
 esac
-# A voice note never approves a landing on its own (bin/fm-inbox.sh voice-gate
-# owns the rule); a yolo task's standing approval came from the keyboard.
-VOICE_STANDING=
-[ "$(grep '^yolo=' "$META" | tail -1 | cut -d= -f2- || true)" != on ] || VOICE_STANDING=--standing
-if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-  "$SCRIPT_DIR/fm-inbox.sh" voice-gate land ${VOICE_STANDING:+"$VOICE_STANDING"}; then
-  echo "error: local merge refused - voice cannot approve it under this home's voice-authority setting; nothing was merged" >&2
-  exit 1
-fi
 merge_status=0
 git -C "$PROJ" merge --ff-only "$BRANCH" >/dev/null || merge_status=$?
 fm_lock_release "$MERGE_CONTROL_LOCK" || true

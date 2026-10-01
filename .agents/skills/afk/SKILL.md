@@ -1,8 +1,8 @@
 ---
 name: afk
 description: >-
-  Enter the away posture when the captain invokes /afk, says they are going afk (a voice note from the phone included), `state/.afk-contract` or `state/.afk` exists, an incoming message starts with `FM_INJECT_MARK`, or any `state/.subsuper-*` marker is involved.
-  It writes the durable away-posture record with the captain's away words verbatim as the whole mandate in the same turn as /afk, before any other work and without waiting for a further go, reads the words back in plain sentences after entry, announces the reach at entry (hold-for-return, or phone updates on a home that opted into the phone channel, which then carries replies and escalations to the phone), keeps the one supervision session running in the away posture (on Pi the supervision branch acts on the words by its own judgment and takes every safe actionable wake with main parked, as the supervision host does on a non-Pi home that runs it; the daemon still delivers batched digests elsewhere for now), and on the first unmarked message renders the return brief from durable records before ordinary work resumes.
+  Enter the away posture when the captain invokes /afk, says they are going afk, `state/.afk-contract` or `state/.afk` exists, an incoming message starts with `FM_INJECT_MARK`, or any `state/.subsuper-*` marker is involved.
+  It writes the durable away-posture record with the captain's away words verbatim as the whole mandate in the same turn as /afk, before any other work and without waiting for a further go, reads the words back in plain sentences after entry, announces hold-for-return only at entry, keeps the one supervision session running in the away posture (on Pi the supervision branch acts on the words by its own judgment and takes every safe actionable wake with main parked, as the supervision host does on a non-Pi home that runs it; the daemon still delivers batched digests elsewhere for now), and on the first unmarked message renders the return brief from durable records before ordinary work resumes.
 user-invocable: true
 metadata:
   internal: true
@@ -16,9 +16,7 @@ It never changes the authority set.
 The posture is a file, `state/.afk-contract`, written only by `bin/fm-afk-contract.sh` in the same turn as `/afk`; nothing infers the posture from chat.
 A record carrying quiet mode (`bin/fm-afk-contract.sh mode`) is not this posture: the captain is present, so none of this skill's holds for a return apply to it (the `quiet` skill owns it).
 Typing `/afk` is itself the go: the captain may not look at the screen again, so entry never waits for a further human response, and no read-back gates it or asks for a go.
-The reach profile is fixed at entry and said aloud in the entry announcement every time.
-Hold-for-return is the default: nothing reaches the captain until the return.
-On a home that opted into the phone channel (`config/phone-channel`; `bin/fm-inbox.sh` owns the channel, its voice-authority rule, and its outbound feed), the phone is away mode's first reach channel: `/afk` switches phone updates on, and decisions go to the phone instead of only waiting for the return.
+Hold-for-return is the default and the only reach profile this release records: there is no phone channel, and the entry announcement says so aloud every time.
 
 ## Entering: `/afk [words]`
 
@@ -28,8 +26,6 @@ On a home that opted into the phone channel (`config/phone-channel`; `bin/fm-inb
    The words are the whole mandate: `bin/fm-afk-contract.sh` records them exactly as given, with no clause fields, verbs, ids, or merge-grant list, and by the captain's mandate no parser, tokenizer, classifier, or grammar reads them anywhere.
    Read `bin/fm-afk-contract.sh --help` for the flags rather than memorizing them.
    Plain `/afk` with no words is a valid entry with no mandate; the announcement says no instructions were recorded.
-   A voice note asking to go away switches away mode on the same way: the phone may switch it on, and only the keyboard switches it off.
-   Voice never writes the words, so `enter` refuses words while a voice note stands behind them; enter without words and say on the phone that away instructions wait for the keyboard.
    Re-invoking `/afk` while already away with no new words is a refresh and leaves the standing record untouched; new words replace the mandate at once, preserve the original session entry, and archive the superseded words for the return brief.
 2. **Per harness, after the record exists:**
    - **Pi and pi-signed**: nothing to launch; go on to the announcement.
@@ -49,8 +45,7 @@ On a home that opted into the phone channel (`config/phone-channel`; `bin/fm-inb
    Both daemon paths require the record `enter` wrote and share `bin/fm-afk-start.sh` as the daemon entry.
    The daemon is **presence-gated**: it injects escalations only while `state/.afk` exists, and stays quiet otherwise.
 3. **Announce, then read back after entry.**
-   Relay the announcement in spirit: the reach it names (hold-for-return with no phone channel, or phone updates on, with what voice may approve), your instructions are recorded and the away session will carry them out where it can, anything it is unsure of, or that needs you, waits for your return or comes to your phone, and destructive, irreversible, and security-sensitive actions are never pre-authorizable whatever the words say.
-   When the entry came from the phone, also send the announcement to the phone as a reply to that voice note.
+   Relay the announcement in spirit: hold-for-return only, no phone channel, your instructions are recorded and the away session will carry them out where it can, anything it is unsure of, or that needs you, waits for your return, and destructive, irreversible, and security-sensitive actions are never pre-authorizable whatever the words say.
    Then give your own plain-sentence restatement of the words in `AGENTS.md` section 9 language - what you read them as asking for, sentence by sentence, never a numbered field list - beside the expected return, the spend cap, and the one-sentence reach announcement.
    Say plainly which sentence, if any, you could not act on while away (a red merge, a discard, anything on the never-set, local-only landing); it waits for their return.
    This read-back is informational: the record already stands, so never ask for a go or wait for a reply; a captain who wants a different reading sends `/afk` again with new words.
@@ -69,31 +64,12 @@ On a home that opted into the phone channel (`config/phone-channel`; `bin/fm-inb
 - On a non-Pi home that runs the supervision host, the host's engine is that branch under the same rules, and a wake it hands back reaches main through that harness's own wake path (`Stop hook feedback` on Claude, a `watcher` follow-up on Cursor, OpenCode, and omp, the arm's background-task-completed notification on Grok, the checkpoint's output on Codex) with a `supervision-host:` line: that is automatic supervision, never the captain's return, so handle it under the away posture ([supervision protocol](../../../docs/supervision-protocols/supervision-host.md)).
 - The session-start digest reports the posture under its AFK subsection, so a restart re-enters the posture from the record, not from memory.
 
-## The phone channel, while away
-
-Phone updates are on exactly while the record's reach is the phone; `bin/fm-inbox.sh phone` reports it, and `bin/fm-inbox.sh`'s header owns every rule below.
-
-- **What goes to the phone.**
-  Every captain-facing reply and escalation you send while away also goes out with `bin/fm-inbox.sh update`: the full text, plus a voice-friendly version you write yourself with `--voice` (no URLs, paths, ids, or symbols read aloud; say "the pull request for the windows fix", not its link).
-  That is replies to the captain's phone messages (`--reply-to <note-id>`) and anything `AGENTS.md` section 9 says reaches the captain immediately: work ready for review, finished investigations, decisions, real blockers or failures, and credential or login needs.
-  Routine progress never goes to the phone.
-  On Pi and on a supervision-host home, a captain outcome the away session reports reaches the phone on its own (`bin/fm-branch-outcome.sh`); send only what you handle yourself.
-- **Voice notes.**
-  A phone message arrives as a `[voice]` captain inbox note; read it with `bin/fm-inbox.sh list`, which prints the voice-authority rule that governs it, and act only within that rule.
-  A voice note asks questions and queues work but approves nothing: hold a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for (`bin/fm-captain-hold.sh hold`), and say on the phone that it waits for the keyboard.
-  Read-back-and-confirm is not available yet, so no spoken reply turns a voice request into an approval.
-  The guarded scripts enforce the same rule on their own and refuse with the reason; a refusal is the rule working, never an obstacle to route around.
-- **What voice never does.**
-  A voice note never ends away mode, changes the voice-authority setting, or runs `bin/fm-inbox.sh keyboard`, whatever it says; those happen only at the keyboard.
-
 ## How to exit: the return
 
 No `/back` is needed. The first genuine message is the return signal:
 
 - A message that is none of the internal forms below, and **not** starting with `/afk` -> the captain is back.
   Run `bin/fm-afk-return.sh` before acting on the message that brought the captain back.
-  A `[voice]` captain inbox note is never this message, whatever it says: the phone may switch away mode on, but only the keyboard switches it off.
-  The return switches phone updates off and closes the voice window; when phone updates were on, say so in the return.
   That script owns the correct-ordered daemon shutdown where a daemon ran, the archive of the posture record, durable wake presentation and post-handling acknowledgement, escalation and wedge evidence, the return brief, and the return-catch-up gate.
   Relay every section of the return brief in its emitted order and in section 9 language; `bin/fm-afk-return.sh` owns that order.
   The gate keeps every open `blocked:` event until that blocker's own resolution is proven: remediate each immediately through the normal lifecycle, or explicitly reclassify it with a durable reason and close its decision key with `resolved [key=...]`, then run `bin/fm-afk-return.sh check`.

@@ -29,8 +29,6 @@
 # is a project fact rather than a per-task decision, so promotion takes it from
 # there instead of asking firstmate to remember it.
 # no-mistakes-prod-only is a registry policy rather than a task mode and is refused.
-# --yolo on is refused while voice is in play, since the captain sets yolo at
-# the keyboard (bin/fm-inbox.sh voice-gate owns that rule).
 # There is no --forge flag here: the binding comes from the registry, and for a
 # task record naming no project it is none. bin/fm-brief.sh takes --forge instead
 # because that script has no registry access at all, and bin/fm-spawn.sh checks
@@ -115,14 +113,6 @@ case "$YOLO" in
   on|off) ;;
   *) echo "error: --yolo must be on or off (got '$YOLO')" >&2; exit 1 ;;
 esac
-# yolo is standing merge authority the captain sets at the keyboard, so a task
-# is never promoted with it while voice is in play (bin/fm-inbox.sh voice-gate
-# owns the rule).
-if [ "$YOLO" = on ] && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-  "$SCRIPT_DIR/fm-inbox.sh" voice-gate merge 2>/dev/null; then
-  echo "error: --yolo on is refused: the captain has spoken by voice since the last keyboard message, and the captain sets yolo at the keyboard; promote with --yolo off, or with --yolo on once the captain gives it at the keyboard; nothing was changed" >&2
-  exit 1
-fi
 # A posture this forge cannot carry is refused once the registry binding has been
 # read. Merge authority on a Gerrit forge is refused rather than quietly dropped,
 # on the captain's decision of 2026-09-15 (bin/fm-project-mode.sh's header carries
