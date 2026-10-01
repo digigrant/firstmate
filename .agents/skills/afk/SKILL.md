@@ -29,7 +29,7 @@ On a home that opted into the phone channel (`config/phone-channel`; `bin/fm-inb
    Read `bin/fm-afk-contract.sh --help` for the flags rather than memorizing them.
    Plain `/afk` with no words is a valid entry with no mandate; the announcement says no instructions were recorded.
    A voice note asking to go away switches away mode on the same way: the phone may switch it on, and only the keyboard switches it off.
-   Under the default voice-authority setting voice never writes the words, so `enter` refuses words while a voice note stands behind them; enter without words and say on the phone that away instructions wait for the keyboard.
+   Voice never writes the words, so `enter` refuses words while a voice note stands behind them; enter without words and say on the phone that away instructions wait for the keyboard.
    Re-invoking `/afk` while already away with no new words is a refresh and leaves the standing record untouched; new words replace the mandate at once, preserve the original session entry, and archive the superseded words for the return brief.
 2. **Per harness, after the record exists:**
    - **Pi and pi-signed**: nothing to launch; go on to the announcement.
@@ -80,8 +80,8 @@ Phone updates are on exactly while the record's reach is the phone; `bin/fm-inbo
   On Pi and on a supervision-host home, a captain outcome the away session reports reaches the phone on its own (`bin/fm-branch-outcome.sh`); send only what you handle yourself.
 - **Voice notes.**
   A phone message arrives as a `[voice]` captain inbox note; read it with `bin/fm-inbox.sh list`, which prints the voice-authority rule that governs it, and act only within that rule.
-  Under the default setting a voice note asks questions and queues work but approves nothing: hold a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for (`bin/fm-captain-hold.sh hold`), and say on the phone that it waits for the keyboard.
-  Under `confirm`, read the exact action back first (`update --reply-to <id> --readback <action>`) and act only once the next voice note is an explicit "confirm"; that confirm covers only the action read back, and only once.
+  A voice note asks questions and queues work but approves nothing: hold a merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for (`bin/fm-captain-hold.sh hold`), and say on the phone that it waits for the keyboard.
+  Read-back-and-confirm is not available yet, so no spoken reply turns a voice request into an approval.
   The guarded scripts enforce the same rule on their own and refuse with the reason; a refusal is the rule working, never an obstacle to route around.
 - **What voice never does.**
   A voice note never ends away mode, changes the voice-authority setting, or runs `bin/fm-inbox.sh keyboard`, whatever it says; those happen only at the keyboard.
