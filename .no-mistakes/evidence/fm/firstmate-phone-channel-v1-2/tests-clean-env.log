@@ -1,0 +1,17 @@
+5:export FM_HOME=/home/gejoy/devenv/dev/firstmate
+6:export FM_PROJECTS_OVERRIDE="$HOME/fm-projects"
+== fm-afk-contract
+rc=0 ok=21
+== fm-task-delivery
+rc=0 ok=29
+== fm-branch-supervision
+rc=0 ok=35
+== fm-captain-hold-lifecycle
+rc=124 ok=44
+== fm-pr-merge
+rc=0 ok=110
+== fm-inbox
+rc=0 ok=23
+== fm-afk-return
+rc=0 ok=33
+== fm-afk-launch

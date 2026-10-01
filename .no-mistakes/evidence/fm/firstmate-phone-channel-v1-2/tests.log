@@ -1,0 +1,50 @@
+== fm-inbox
+ok - a voice note keeps its marker in every view and a re-sent recording is taken in once
+ok - a voice note completed after a crash is recorded in the voice window
+ok - under hold, voice approves nothing until the keyboard closes the voice window
+ok - the keyboard closes the voice window only for voice notes already handled
+fm-inbox: /tmp/fm-inbox.N9xKFy/phone-confirm-off/config/voice-authority holds 'confirm', but read-back-and-confirm is not available yet; voice approvals are held for the keyboard
+fm-inbox: /tmp/fm-inbox.N9xKFy/phone-confirm-off/config/voice-authority holds 'bogus', which is not a voice-authority setting (only hold is available); voice approvals are held for the keyboard
+ok - a confirm setting counts as hold, a spoken confirm approves nothing, and the read-back options are gone
+ok - the phone feed carries replies and away escalations with unique ids that a re-send keeps
+== fm-afk-contract
+ok - malformed inputs and foreign record versions are refused rather than guessed
+ok - retired clause fields, --grant, and the clause and grant subcommands are refused by name
+ok - a version 1 record validates, reads its words and scalars with the clause and grant sections ignored, refreshes untouched, and archives
+ok - new words over a live version 1 record archive it and write version 2 with the same session start
+ok - enter and archive refuse while the record is locked, and proceed once it clears
+ok - a quiet record announces, refreshes, and reads back as a present captain holding nothing, while an away record keeps hold-for-return
+ok - an away entry over quiet mode records away, and a quiet entry never masks a standing away record
+not ok - phone-reach: reach is not the phone
+== fm-afk-launch
+ok - herdr e2e: captain tab pane count unchanged after start (no split)
+ok - herdr e2e: daemon launched in a separate non-visible workspace
+ok - herdr e2e: daemon pane is NOT in the captain's tab
+ok - herdr e2e: daemon terminal scoped to the lab session
+ok - herdr e2e: captain tab pane count restored after stop
+ok - herdr e2e: daemon workspace removed by exact id on stop
+ok - herdr e2e: record + .afk cleared on stop
+skip: tmux not found (tmux e2e)
+== fm-pr-merge
+ok - fm-pr-merge reports every failing GitLab condition, not only the first
+ok - fm-pr-merge reports a stale recorded head and verifies the live one
+ok - fm-pr-merge refuses an unreadable GitLab merge request state rather than merging blind
+ok - fm-pr-merge refuses a GitLab head commit it cannot validate
+ok - fm-pr-merge refuses before recording anything when glab or jq is absent
+ok - fm-pr-merge refuses a GitLab head override before recording state
+sed: can't read /tmp/fm-pr-merge-tests.g9hFa5/secondmate-merge-reports/state/parent-replies.status: No such file or directory
+not ok - secondmate-merge-reports: the landed PR was not reported upward
+== fm-captain-hold-lifecycle
+      "reveal": "--all-landed"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}
+== fm-task-delivery
+not ok - intent brief should scaffold
+== fm-branch-supervision
+ok - branch prompt is byte-stable across homes, cwd, timezone, and time, above the cache floor
+not ok - first outcome seq was 9, not 1
