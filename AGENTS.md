@@ -275,7 +275,6 @@ Handle actionable wakes as follows:
 1. For `signal:`, read the listed event lines first, then reconcile current state only where action depends on it.
 2. For `stale:`, inspect the recorded endpoint and load `stuck-crewmate-recovery` for a stopped, looping, confused, or unresponsive worker; a deep-inspection reason also requires current-state and validation-log inspection.
 3. For `check:`, act on the named poll result, including merges, contribution signals, Relay events, process-to-event source results, and captain inbox notes; a handled inbox note is also acknowledged with `bin/fm-inbox.sh drain --ack <id>`, or it stays counted as still waiting for firstmate.
-   Read a `[voice]` note through `bin/fm-inbox.sh list`, which prints the voice-authority rule that governs it, and while its voice window is open run `bin/fm-inbox.sh keyboard` before acting on the captain's next unmarked keyboard message outside away mode (the script header owns the rule).
    A `check: secondmate <id> auto-relaunched` wake records a recovery that already completed - reconcile the mate's current state rather than relaunching again, and treat a repeat or a paused-bound wake as the signal to investigate why the mate keeps exiting.
    When the note needs a durable answer the submitter can read, publish it with `bin/fm-inbox.sh reply <id>` (the script header owns the reply contract) rather than leaving the answer only in this transcript.
 4. For `heartbeat:`, review the whole fleet from the structured fleet view, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
@@ -413,7 +412,6 @@ When Relay is enabled, load `fmx-respond` for its activation, authority, mention
 ## Captain instruction precedence
 
 A current, explicit, concrete captain instruction overrides any conflicting standing rule written above.
-An instruction that arrives as a voice-origin inbox note carries only the authority this home's voice-authority setting grants (`bin/fm-inbox.sh` owns the rule).
 The instruction must be specific and recent: it must identify the concrete action, object, or bounded set it governs.
 Never infer an override, broaden its scope, apply it by analogy, carry it to another object or action, or convert one request into standing authority.
 Ambiguous scope or conflict still requires one concise clarification before action.

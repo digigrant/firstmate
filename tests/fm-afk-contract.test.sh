@@ -2,8 +2,7 @@
 # tests/fm-afk-contract.test.sh - the away-posture record owner
 # (bin/fm-afk-contract.sh): the captain's away words recorded verbatim as the
 # whole mandate, the read-back rendering, the entry announcement (hold-for-
-# return, or the phone reach on a phone-channel home, where voice never writes
-# the words), the one-step same-turn entry with no wait for a go, the
+# return only), the one-step same-turn entry with no wait for a go, the
 # retired two-step entry refusing by name, the refresh and replace rules,
 # the archive at return, the version 2 record with version 1 still readable,
 # the retired clause and merge-grant apparatus refusing by name, and the read
@@ -509,62 +508,6 @@ test_version_1_record_is_replaced_by_a_version_2_record() {
 # and merges). While a reader holds that lock, enter and archive must refuse
 # and change nothing, so no publication, replacement, or archive can land inside
 # the window between that read and the action it authorized.
-# A home that opted into the phone channel records the phone as the reach and
-# says so; voice can switch away mode on but never writes the away words.
-test_phone_channel_reach_and_voice_held_words() {
-  local home out rc inbox="$ROOT/bin/fm-inbox.sh" note
-  home=$(make_home phone-reach)
-  mkdir -p "$home/config"
-  : > "$home/config/phone-channel"
-  out=$(contract "$home" enter --words 'merge the windows fix when green') \
-    || fail "phone-reach: enter failed: $out"
-  [ "$(contract "$home" field reach_channels)" = phone ] || fail "phone-reach: reach is not the phone"
-  contract "$home" validate || fail "phone-reach: a phone-reach record does not validate"
-  assert_contains "$out" 'Away posture recorded at' 'phone-reach: no announcement'
-  assert_contains "$out" ': phone updates on. Phone updates are on: replies, decisions, and anything else that needs you come to your phone; by voice you can ask questions and queue work, approvals wait for the keyboard' \
-    'phone-reach: the announcement did not name the phone reach under hold'
-  assert_contains "$out" 'anything it is unsure of, or that needs you, comes to your phone.' \
-    'phone-reach: the mandate text still says everything waits for the return'
-  assert_contains "$out" '  reach: phone updates on. ' 'phone-reach: the read-back did not name the phone reach'
-  contract "$home" archive >/dev/null || fail "phone-reach: archive failed"
-
-  # Read-back-and-confirm is not available yet, so a confirm setting announces
-  # the same hold reach and never offers approval by voice.
-  printf 'confirm\n' > "$home/config/voice-authority"
-  out=$(contract "$home" enter 2>&1) || fail "phone-reach: confirm-setting entry failed: $out"
-  assert_contains "$out" 'by voice you can ask questions and queue work, approvals wait for the keyboard' \
-    'phone-reach: a confirm setting did not announce the hold reach'
-  assert_not_contains "$out" 'you say "confirm"' 'phone-reach: the announcement offered approval by voice'
-  assert_contains "$out" 'read-back-and-confirm is not available yet' \
-    'phone-reach: entry did not warn that the confirm setting is not available'
-  contract "$home" archive >/dev/null || fail "phone-reach: archive failed"
-  rm -f "$home/config/voice-authority"
-
-  # A phone message asking to go away: words are refused while the voice note
-  # stands behind them, and a wordless entry still switches away mode on.
-  note=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" note --origin voice \
-    --request-id afk-1 --json "going out, merge everything green" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "phone-reach: voice note refused"
-  rc=0
-  out=$(contract "$home" enter --words 'merge everything green' 2>&1) || rc=$?
-  expect_code 1 "$rc" "phone-reach: voice-backed away words must be refused"
-  assert_contains "$out" 'the away instructions were not recorded and nothing changed' \
-    'phone-reach: the refusal did not say nothing changed'
-  [ ! -e "$home/state/.afk-contract" ] || fail "phone-reach: a refused entry still wrote a record"
-  contract "$home" enter >/dev/null || fail "phone-reach: a wordless entry from the phone failed"
-  [ "$(contract "$home" words)" = '' ] || fail "phone-reach: the phone entry recorded words"
-  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" drain --ack "$note" >/dev/null
-  rc=0
-  contract "$home" enter --words 'merge everything green' >/dev/null 2>&1 || rc=$?
-  expect_code 1 "$rc" "phone-reach: a handled voice note still leaves the words to the keyboard"
-  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" keyboard >/dev/null
-  contract "$home" enter --words 'merge the windows fix when green' >/dev/null \
-    || fail "phone-reach: keyboard words were refused after the keyboard closed the voice window"
-  [ "$(contract "$home" words)" = 'merge the windows fix when green' ] \
-    || fail "phone-reach: the keyboard words were not recorded"
-  pass "a phone-channel home records and announces phone reach, and voice switches away mode on without ever writing the words"
-}
-
 test_record_changes_refuse_while_a_reader_holds_the_lock() {
   local home lock holder_pid i rc out before
   home=$(make_home lock-contended)
@@ -624,11 +567,6 @@ test_record_changes_refuse_while_a_reader_holds_the_lock() {
 # hold-for-return reading unchanged.
 test_quiet_record_reads_as_a_present_captain_holding_nothing() {
   local home out
-  home=$(make_home quiet-phone-home)
-  mkdir -p "$home/config"
-  : > "$home/config/phone-channel"
-  FM_AFK_MODE=quiet contract "$home" enter >/dev/null 2>&1 || fail "quiet entry in a phone home failed"
-  [ "$(contract "$home" field reach_channels)" = none ] || fail "a quiet record in a phone home turned phone updates on"
   home=$(make_home quiet-present)
   out=$(FM_AFK_MODE=quiet contract "$home" enter 2>&1) || fail "quiet entry failed: $out"
   assert_contains "$out" 'Quiet mode recorded at ' 'quiet announcement names quiet mode'
@@ -704,4 +642,3 @@ test_version_1_record_is_replaced_by_a_version_2_record
 test_record_changes_refuse_while_a_reader_holds_the_lock
 test_quiet_record_reads_as_a_present_captain_holding_nothing
 test_away_entry_over_quiet_mode_becomes_away_and_quiet_never_masks_away
-test_phone_channel_reach_and_voice_held_words

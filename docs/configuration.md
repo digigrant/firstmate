@@ -12,7 +12,6 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
-| Talking to Firstmate from a phone | [Phone channel](#phone-channel-configphone-channel-configvoice-authority) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
@@ -2246,29 +2245,6 @@ The two read files use different parsing rules:
 - In `config/voice-read-deny`, every line that is neither blank nor a `#` comment adds one substring.
 
 `FM_VOICE_RELAY` and `FM_VOICE_PYTHON` belong to the laptop rather than to a home, so they have no config file: `bin/fm-voice-client.py` requires the relay path as a flag or that variable and carries no default path.
-
-## Phone channel (config/phone-channel, config/voice-authority)
-
-The phone channel is Firstmate's side of a spoken walkie-talkie link from the captain's phone: a connector hands in what the captain says as voice-origin inbox notes and reads back what Firstmate sends from a local feed.
-`bin/fm-inbox.sh` owns the channel's contract: the voice-origin marker, the voice-authority rule and the scripts that enforce it, and the outbound feed.
-`bin/fm-afk-contract.sh` owns how away mode reaches the phone.
-
-| File | Holds |
-| --- | --- |
-| `config/phone-channel` | Presence flag that opts this home in. Absent, no voice-origin note is accepted, nothing is written to the phone feed, and away mode keeps hold-for-return with its unchanged announcement. |
-| `config/voice-authority` | `hold`, the only setting available now and what an absent file means. |
-
-The voice-authority setting decides what the captain's voice may approve.
-Under `hold`, by voice the captain can ask questions and queue work, while every merge, every destructive, irreversible, or security-sensitive action, every captain decision, and every away instruction waits for the keyboard.
-While voice is in play, a task is never started or promoted with autonomous merging (yolo) switched on, because the captain sets yolo at the keyboard.
-Read-back-and-confirm, where voice could approve after Firstmate reads the exact action back, is not available yet: `confirm` counts as `hold` with a warning saying so.
-
-Only the captain changes the setting, at the keyboard; Firstmate never changes it because a voice note asked.
-The file is read as its first line that is not blank and not a `#` comment, and any other value or an unreadable file also counts as `hold` with a warning, so a typo never widens what voice may approve.
-
-With the channel on, `/afk` records the phone as away mode's reach: replies and escalations, decisions included, go to the phone for the whole away window.
-The phone may also switch away mode on, and only the captain's first keyboard message switches it off, which ends phone updates and brings the usual return catch-up.
-Neither file is inherited by secondmate homes, which never talk to the captain directly.
 
 ## Environment variables
 
