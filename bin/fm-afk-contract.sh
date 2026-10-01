@@ -277,6 +277,7 @@ fm_afk_contract_reach_resolve() {
   fi
   opted=$(printf '%s\n' "$phone" | sed -n 's/^opted_in=//p')
   [ "$opted" = 1 ] || return 0
+  [ "${FM_AFK_CONTRACT_ENTRY_MODE:-away}" = away ] || return 0
   REACH=phone
   REACH_ANNOUNCED=$FM_AFK_CONTRACT_REACH_PHONE
 }
