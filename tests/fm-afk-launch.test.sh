@@ -204,8 +204,10 @@ unit_pi_enter_stop_does_not_claim_a_daemon_terminal() {
 # the voice window a phone message opened.
 unit_phone_reach_ends_at_the_keyboard_return() {
   local st out rc handled pending inbox="$ROOT/bin/fm-inbox.sh"
+  local FM_CONFIG_OVERRIDE
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-phone.XXXXXX")
   mkdir -p "$st/state" "$st/config"
+  export FM_CONFIG_OVERRIDE="$st/config"
   : > "$st/config/phone-channel"
   out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" enter 2>&1) \
     || fail "phone reach: enter failed: $out"
