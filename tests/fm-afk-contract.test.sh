@@ -624,6 +624,11 @@ test_record_changes_refuse_while_a_reader_holds_the_lock() {
 # hold-for-return reading unchanged.
 test_quiet_record_reads_as_a_present_captain_holding_nothing() {
   local home out
+  home=$(make_home quiet-phone-home)
+  mkdir -p "$home/config"
+  : > "$home/config/phone-channel"
+  FM_AFK_MODE=quiet contract "$home" enter >/dev/null 2>&1 || fail "quiet entry in a phone home failed"
+  [ "$(contract "$home" field reach_channels)" = none ] || fail "a quiet record in a phone home turned phone updates on"
   home=$(make_home quiet-present)
   out=$(FM_AFK_MODE=quiet contract "$home" enter 2>&1) || fail "quiet entry failed: $out"
   assert_contains "$out" 'Quiet mode recorded at ' 'quiet announcement names quiet mode'
