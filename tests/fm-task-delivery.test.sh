@@ -529,6 +529,65 @@ test_local_merge_is_held_for_the_keyboard_after_a_voice_note() {
   pass "fm-merge-local: a voice note never approves a landing, while yolo standing approval still lands"
 }
 
+# yolo is standing merge authority the captain sets at the keyboard, so while
+# voice is in play - a voice note pending, or handled but not yet followed by a
+# keyboard message - a spawn or promotion asking for it refuses and records
+# nothing, while yolo off proceeds. Once the keyboard closes the voice window,
+# yolo on is accepted again.
+test_yolo_on_is_refused_while_voice_is_in_play() {
+  local rec home proj fakebin out status note meta inbox="$ROOT/bin/fm-inbox.sh"
+  local refusal="the captain sets yolo at the keyboard"
+  rec=$(make_home voice-yolo "- proj [no-mistakes +yolo] - fixture (added 2026-01-01)")
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  : > "$home/config/phone-channel"
+  note=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" "$inbox" \
+    note --origin voice --request-id yolo-1 --json "start on the windows fix" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || fail "the voice note was refused"
+
+  write_brief "$home" voice-yolo-s1 no-mistakes
+  out=$(run_spawn "$home" "$fakebin" voice-yolo-s1 "$proj" claude --mode no-mistakes --yolo on)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a spawn with --yolo on launched while a voice note was pending"
+  assert_contains "$out" "--yolo on is refused" "the spawn refusal did not name the refused flag"
+  assert_contains "$out" "$refusal" "the spawn refusal did not say yolo is set at the keyboard"
+  assert_absent "$home/state/voice-yolo-s1.meta" "the refused spawn still recorded a task"
+  out=$(run_spawn "$home" "$fakebin" voice-yolo-s1 "$proj" claude --mode no-mistakes --yolo off)
+  assert_not_contains "$out" "$refusal" "a spawn with --yolo off was refused by the voice rule"
+
+  meta="$home/state/voice-yolo-p1.meta"
+  write_brief "$home" voice-yolo-p1
+  printf 'window=fm-voice-yolo-p1\nkind=scout\nworktree=/tmp/wt\n' > "$meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" voice-yolo-p1 --mode direct-PR --yolo on 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a promotion with --yolo on was accepted while a voice note was pending"
+  assert_contains "$out" "$refusal" "the promotion refusal did not say yolo is set at the keyboard"
+  grep -qx 'kind=scout' "$meta" || fail "the refused promotion still flipped the task record"
+  assert_no_grep 'yolo=' "$meta" "the refused promotion recorded a merge posture"
+
+  # Handling the voice note is not a keyboard message: yolo on still waits.
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" drain --ack "$note" >/dev/null
+  out=$(run_spawn "$home" "$fakebin" voice-yolo-s1 "$proj" claude --mode no-mistakes --yolo on)
+  assert_contains "$out" "$refusal" "a handled voice note let a spawn start with yolo on before the keyboard"
+  assert_absent "$home/state/voice-yolo-s1.meta" "the refused spawn still recorded a task"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" voice-yolo-p1 --mode direct-PR --yolo on 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a handled voice note let a promotion take yolo on before the keyboard"
+  grep -qx 'kind=scout' "$meta" || fail "the refused promotion still flipped the task record"
+
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$inbox" keyboard >/dev/null \
+    || fail "the keyboard did not close the voice window"
+  out=$(run_spawn "$home" "$fakebin" voice-yolo-s1 "$proj" claude --mode no-mistakes --yolo on)
+  assert_not_contains "$out" "$refusal" "yolo on was still refused after the keyboard closed the voice window"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" voice-yolo-p1 --mode direct-PR --yolo on 2>&1)
+  status=$?
+  expect_code 0 "$status" "a promotion with --yolo on should succeed after the keyboard: $out"
+  assert_grep 'yolo=on' "$meta" "the promotion did not record yolo on after the keyboard"
+  pass "fm-spawn/fm-promote: yolo on is refused while voice is in play, and accepted after the keyboard"
+}
+
 # A registered name may contain spaces, and the lookup must match the whole
 # name rather than only its first whitespace-delimited token (issue #1977).
 # The longer "foo bar" row is listed before the "foo" row so a leading-prefix
@@ -1664,6 +1723,7 @@ test_promotion_persists_the_selected_ship_branch
 test_promotion_branch_command_is_shell_safe
 test_local_merge_uses_the_recorded_ship_branch
 test_local_merge_is_held_for_the_keyboard_after_a_voice_note
+test_yolo_on_is_refused_while_voice_is_in_play
 test_project_mode_matches_whole_multiword_names
 test_project_mode_maps_the_conditional_policy
 test_project_mode_binds_the_forge_orthogonally

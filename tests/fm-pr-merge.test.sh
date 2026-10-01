@@ -3364,10 +3364,11 @@ test_pending_voice_merge_survives_the_keyboard() {
   pass "a pending voice \"merge it\" stays refused across an unrelated keyboard message and the away return"
 }
 
-# Under read-back-and-confirm, voice approves only after the exact action is
-# read back and the captain's next voice note is an explicit "confirm".
-test_voice_merge_needs_a_readback_and_confirm_under_confirm() {
-  local case_dir rc url head note
+# Read-back-and-confirm is not available yet, so a confirm setting counts as
+# hold: a voice "merge it" followed by a spoken "confirm" is still held for the
+# keyboard, with a warning that the setting is not available.
+test_voice_merge_is_held_under_a_confirm_setting() {
+  local case_dir rc url head note confirm
   head=b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
   url=https://github.com/example/repo/pull/92
   case_dir=$(make_case voice-merge-confirm)
@@ -3376,32 +3377,32 @@ test_voice_merge_needs_a_readback_and_confirm_under_confirm() {
   : > "$case_dir/home/config/phone-channel"
   printf 'confirm\n' > "$case_dir/home/config/voice-authority"
   note=$(voice_note_in "$case_dir" rec-c-1 "merge it") || fail "voice-merge-confirm: the voice note was refused"
+  confirm=$(voice_note_in "$case_dir" rec-c-2 " Confirm. ") || fail "voice-merge-confirm: the spoken confirm was refused"
 
   rc=0
   run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  expect_code 1 "$rc" "voice-merge-confirm: a merge with no read-back must be refused"
-  assert_grep 'read this merge back' "$case_dir/stderr" \
-    "voice-merge-confirm: the refusal did not ask for a read-back"
+  expect_code 1 "$rc" "voice-merge-confirm: a spoken confirm must not authorize the merge"
+  assert_grep 'read-back-and-confirm is not available yet' "$case_dir/stderr" \
+    "voice-merge-confirm: the refusal did not say the confirm setting is not available"
+  assert_grep "voice note $note $confirm is still pending" "$case_dir/stderr" \
+    "voice-merge-confirm: the refusal did not name the pending voice notes"
+  assert_grep 'hold it for the keyboard' "$case_dir/stderr" \
+    "voice-merge-confirm: the refusal did not say the merge waits for the keyboard"
   refute_gh_merge "$case_dir" voice-merge-confirm
 
-  inbox_in "$case_dir" update --reply-to "$note" --readback merge \
-    --voice 'I will merge the windows fix. Say confirm.' \
-    "I will merge $url. Say confirm." >/dev/null || fail "voice-merge-confirm: the read-back failed"
-  voice_note_in "$case_dir" rec-c-2 " Confirm. " >/dev/null || fail "voice-merge-confirm: the confirmation was refused"
-  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
-    || fail "voice-merge-confirm: the confirmed merge failed: $(cat "$case_dir/stderr")"
-  assert_logged_gh_merge "$case_dir" 92 example/repo --squash
-
-  # The confirm was spent by that merge: a second merge needs its own
-  # read-back and confirm.
-  : > "$case_dir/gh.log"
+  inbox_in "$case_dir" drain --ack "$note" "$confirm" >/dev/null || fail "voice-merge-confirm: ack failed"
   rc=0
   run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  expect_code 1 "$rc" "voice-merge-confirm: one confirm must not authorize a second merge"
-  assert_grep 'a confirm already spent authorizes nothing more' "$case_dir/stderr" \
-    "voice-merge-confirm: the second merge was not refused by the voice rule: $(cat "$case_dir/stderr")"
-  refute_gh_merge "$case_dir" voice-merge-confirm-second
-  pass "under the confirm setting a voice merge waits for a read-back and a spoken confirm, which covers that one merge only"
+  expect_code 1 "$rc" "voice-merge-confirm: a handled spoken confirm must still not authorize the merge"
+  assert_grep 'waits for the keyboard' "$case_dir/stderr" \
+    "voice-merge-confirm: the refusal did not say the approval waits for the keyboard"
+  refute_gh_merge "$case_dir" voice-merge-confirm-acked
+
+  inbox_in "$case_dir" keyboard >/dev/null || fail "voice-merge-confirm: keyboard failed"
+  run_pr_merge "$case_dir" task-x1 "$url" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "voice-merge-confirm: the keyboard-approved merge failed: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 92 example/repo --squash
+  pass "under a confirm setting a voice merge is still held for the keyboard, because read-back-and-confirm is not available yet"
 }
 
 test_merge_refuses_when_the_away_record_cannot_be_locked() {
@@ -3892,7 +3893,7 @@ test_away_record_cannot_change_between_the_authority_read_and_the_merge
 test_a_record_made_unreadable_before_the_merge_refuses_it
 test_merge_refuses_when_the_away_record_cannot_be_locked
 test_voice_merge_it_is_held_for_the_keyboard
-test_voice_merge_needs_a_readback_and_confirm_under_confirm
+test_voice_merge_is_held_under_a_confirm_setting
 test_pending_voice_merge_survives_the_keyboard
 test_allow_red_refused_on_gitlab
 test_required_check_that_never_reported_refuses

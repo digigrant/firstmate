@@ -2209,15 +2209,15 @@ The phone channel is Firstmate's side of a spoken walkie-talkie link from the ca
 | File | Holds |
 | --- | --- |
 | `config/phone-channel` | Presence flag that opts this home in. Absent, no voice-origin note is accepted, nothing is written to the phone feed, and away mode keeps hold-for-return with its unchanged announcement. |
-| `config/voice-authority` | `hold` (the default, and what an absent file means) or `confirm`. |
+| `config/voice-authority` | `hold`, the only setting available now and what an absent file means. |
 
-The voice-authority setting decides what the captain's voice may approve:
-
-- `hold`: by voice the captain can ask questions and queue work, while every merge, every destructive, irreversible, or security-sensitive action, and every captain decision waits for the keyboard.
-- `confirm`: voice may approve those too, but only after Firstmate reads the exact action back on the phone and the captain's next spoken message is "confirm".
+The voice-authority setting decides what the captain's voice may approve.
+Under `hold`, by voice the captain can ask questions and queue work, while every merge, every destructive, irreversible, or security-sensitive action, every captain decision, and every away instruction waits for the keyboard.
+While voice is in play, a task is never started or promoted with autonomous merging (yolo) switched on, because the captain sets yolo at the keyboard.
+Read-back-and-confirm, where voice could approve after Firstmate reads the exact action back, is not available yet: `confirm` counts as `hold` with a warning saying so.
 
 Only the captain changes the setting, at the keyboard; Firstmate never changes it because a voice note asked.
-The file is read as its first line that is not blank and not a `#` comment, and any other value or an unreadable file counts as `hold` with a warning, so a typo never widens what voice may approve.
+The file is read as its first line that is not blank and not a `#` comment, and any other value or an unreadable file also counts as `hold` with a warning, so a typo never widens what voice may approve.
 
 With the channel on, `/afk` records the phone as away mode's reach: replies and escalations, decisions included, go to the phone for the whole away window.
 The phone may also switch away mode on, and only the captain's first keyboard message switches it off, which ends phone updates and brings the usual return catch-up.

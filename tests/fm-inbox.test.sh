@@ -8,7 +8,8 @@
 # projection's model-aware verdict and unknown path. Human note/list/drain
 # behaviour stays unchanged when the new flags are omitted. The phone channel's
 # cases cover the opt-in, the voice-origin marker in every view, re-sent
-# recordings, the voice-authority gate under hold and confirm, and the feed.
+# recordings, the voice-authority gate (hold, with confirm not available yet),
+# and the feed.
 set -euo pipefail
 
 # shellcheck source=tests/lib.sh
@@ -673,56 +674,65 @@ assert_equals "closed" "$(phone_field "$home" voice_window)" "no pending voice n
 assert_equals "0" "$(gate_code "$home" merge)" "the keyboard approval passes once nothing voice is pending"
 pass "the keyboard closes the voice window only for voice notes already handled"
 
-# Under confirm, a read-back followed by an explicit spoken confirm approves;
-# anything else, and any setting typo, holds.
-home=$(phone_home phone-confirm confirm)
+# Read-back-and-confirm is not available yet: a `confirm` setting, like any
+# other value, counts as hold with a warning, so a spoken "confirm" approves
+# nothing, and the update options that once carried a read-back or a voice file
+# are refused rather than sent to the phone as text.
+home=$(phone_home phone-confirm-off confirm)
+set +e
+phone_err=$(run_inbox "$home" phone 2>&1 >/dev/null)
+set -e
+assert_equals "hold" "$(phone_field "$home" voice_authority)" "a confirm setting reads as hold"
+assert_contains "$phone_err" "read-back-and-confirm is not available yet" \
+  "the confirm setting is reported as not available"
 vid=$(run_inbox "$home" note --origin voice --request-id c-1 --json "merge it" | json_get id)
-assert_equals "1" "$(gate_code "$home" merge)" "confirm without a read-back holds"
-run_inbox "$home" note --origin voice --request-id c-0 "confirm" >/dev/null
-assert_equals "1" "$(gate_code "$home" merge)" "a confirm with no read-back before it holds"
-run_inbox "$home" update --reply-to "$vid" --readback merge --voice "I will merge it. Say confirm." \
-  "I will merge the pull request. Say confirm." >/dev/null || fail "the read-back should be sent"
-assert_equals "1" "$(gate_code "$home" merge)" "a read-back alone holds"
-run_inbox "$home" note --origin voice --request-id c-2 "yes do it" >/dev/null
-assert_equals "1" "$(gate_code "$home" merge)" "anything but an explicit confirm holds"
-run_inbox "$home" update --reply-to "$vid" --readback merge --voice "Say confirm." "Say confirm." >/dev/null
-run_inbox "$home" note --origin voice --request-id c-3 " Confirm! " >/dev/null
-assert_equals "valid:merge" "$(phone_field "$home" confirmation)" "the spoken confirm is recognized for the read-back action"
-assert_equals "1" "$(gate_code "$home" discard)" "a confirm never covers an action other than the one read back"
+list_out=$(run_inbox "$home" list 2>/dev/null)
+assert_contains "$list_out" "this home's voice-authority setting is hold." \
+  "list prints the hold rule under a confirm setting"
+assert_contains "$list_out" "waits for the keyboard" "the rule under a confirm setting holds approvals"
+assert_not_contains "$list_out" '"confirm"' "the rule never offers a spoken confirm"
+run_inbox "$home" note --origin voice --request-id c-2 " Confirm! " >/dev/null
+assert_equals "1" "$(gate_code "$home" merge)" "a spoken confirm approves nothing"
 set +e
-mismatch_err=$(run_inbox "$home" voice-gate land 2>&1 >/dev/null)
+gate_err=$(run_inbox "$home" voice-gate merge 2>&1 >/dev/null)
 set -e
-assert_contains "$mismatch_err" "answered a read-back of a merge" "the mismatch refusal names the action read back"
-assert_equals "0" "$(gate_code "$home" merge --check)" "a check does not spend the confirmation"
-assert_equals "valid:merge" "$(phone_field "$home" confirmation)" "the confirmation survives a check"
-assert_equals "0" "$(gate_code "$home" merge)" "a read-back followed by confirm approves that action"
-assert_equals "none" "$(phone_field "$home" confirmation)" "the approval spent the confirmation"
-assert_equals "1" "$(gate_code "$home" merge)" "the same action a second time needs a new read-back and confirm"
-assert_equals "1" "$(gate_code "$home" discard)" "another action after the one confirm is refused"
-set +e
-run_inbox "$home" update --reply-to "$vid" --readback --voice "x" "x" >/dev/null 2>&1
-bare_readback=$?
-set -e
-expect_code 1 "$bare_readback" "a read-back must name the one action it covers"
-run_inbox "$home" update --reply-to "$vid" --readback discard --voice "Say confirm." "Say confirm." >/dev/null
-run_inbox "$home" note --origin voice --request-id c-4 "confirm" >/dev/null
-assert_equals "0" "$(gate_code "$home" discard)" "a new read-back and confirm authorize the next action"
-# Standing authority neither spends nor trips on a confirmation for another
-# action once no voice note is pending.
-run_inbox "$home" update --reply-to "$vid" --readback discard --voice "Say confirm." "Say confirm." >/dev/null
-cid=$(run_inbox "$home" note --origin voice --request-id c-5 --json "confirm" | json_get id)
+assert_contains "$gate_err" "read-back-and-confirm is not available yet" \
+  "the refusal says why the confirm setting is not honoured"
+assert_contains "$gate_err" "voice-authority setting (hold)" "the refusal applies the hold rule"
 for pending_id in $(run_inbox "$home" receipts --all-pending | python3 -c 'import json,sys
 print(" ".join(r["id"] for r in json.load(sys.stdin)["pending"]))'); do
   run_inbox "$home" drain --ack "$pending_id" >/dev/null
 done
-assert_equals "0" "$(gate_code "$home" merge --standing)" "a standing merge does not trip on a confirm for a discard"
-assert_equals "valid:discard" "$(phone_field "$home" confirmation)" "a standing merge does not spend the captain's confirm"
-assert_equals "0" "$(gate_code "$home" discard)" "the confirmed discard still proceeds after the standing merge"
-[ -n "$cid" ] || fail "the confirm note had no id"
+for action in merge land discard decide mandate; do
+  assert_equals "1" "$(gate_code "$home" "$action")" "a handled spoken confirm still holds $action for the keyboard"
+done
+assert_equals "0" "$(gate_code "$home" merge --standing)" "standing authority passes once nothing is pending"
+set +e
+run_inbox "$home" voice-gate merge --check >/dev/null 2>&1
+check_code=$?
+readback_out=$(run_inbox "$home" update --reply-to "$vid" --voice "Say confirm." --readback merge \
+  "I will merge it. Say confirm." 2>&1)
+readback_code=$?
+printf 'Two jobs are running.\n' > "$home/voice.txt"
+voice_file_out=$(run_inbox "$home" update --reply-to "$vid" --voice-file "$home/voice.txt" \
+  "Two jobs are running." 2>&1)
+voice_file_code=$?
+set -e
+expect_code 2 "$check_code" "the gate has no --check option to answer"
+expect_code 1 "$readback_code" "an update with --readback is refused"
+assert_contains "$readback_out" "unknown update option --readback" "the read-back refusal names the option"
+expect_code 1 "$voice_file_code" "an update with --voice-file is refused"
+assert_contains "$voice_file_out" "unknown update option --voice-file" "the voice-file refusal names the option"
+assert_absent "$home/state/inbox/.phone-feed.jsonl" "a refused update writes nothing to the phone feed"
+dash_text=$(run_inbox "$home" update --reply-to "$vid" --voice "Noted." --json -- "--readback is gone") \
+  || fail "text after -- that starts with a dash should be sent"
+assert_equals "--readback is gone" "$(run_inbox "$home" feed | json_get updates 0 text)" \
+  "text after -- is sent as text"
+[ -n "$dash_text" ] || fail "the update after -- printed nothing"
 printf 'bogus\n' > "$home/config/voice-authority"
 assert_equals "hold" "$(phone_field "$home" voice_authority)" "an unknown setting reads as hold"
 assert_equals "1" "$(gate_code "$home" merge)" "an unknown setting never approves by voice"
-pass "under confirm, a spoken confirm approves only the action read back, and only once"
+pass "a confirm setting counts as hold, a spoken confirm approves nothing, and the read-back options are gone"
 
 # The outbound feed: replies whenever opted in, escalations only while phone
 # updates are on, unique update ids, and a re-send that keeps its id.

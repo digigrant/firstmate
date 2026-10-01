@@ -528,10 +528,15 @@ test_phone_channel_reach_and_voice_held_words() {
   assert_contains "$out" '  reach: phone updates on. ' 'phone-reach: the read-back did not name the phone reach'
   contract "$home" archive >/dev/null || fail "phone-reach: archive failed"
 
+  # Read-back-and-confirm is not available yet, so a confirm setting announces
+  # the same hold reach and never offers approval by voice.
   printf 'confirm\n' > "$home/config/voice-authority"
-  out=$(contract "$home" enter) || fail "phone-reach: confirm entry failed"
-  assert_contains "$out" 'you can approve by voice once the exact action is read back to you and you say "confirm"' \
-    'phone-reach: the confirm announcement did not describe read-back-and-confirm'
+  out=$(contract "$home" enter 2>&1) || fail "phone-reach: confirm-setting entry failed: $out"
+  assert_contains "$out" 'by voice you can ask questions and queue work, approvals wait for the keyboard' \
+    'phone-reach: a confirm setting did not announce the hold reach'
+  assert_not_contains "$out" 'you say "confirm"' 'phone-reach: the announcement offered approval by voice'
+  assert_contains "$out" 'read-back-and-confirm is not available yet' \
+    'phone-reach: entry did not warn that the confirm setting is not available'
   contract "$home" archive >/dev/null || fail "phone-reach: archive failed"
   rm -f "$home/config/voice-authority"
 

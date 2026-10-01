@@ -16,7 +16,9 @@
 #   captain's confirmed project fact rather than a per-task choice: a spawn
 #   refuses a brief whose `forge=` disagrees with the registered binding in
 #   either direction, and refuses --yolo on for a forge=gerrit project, where
-#   yolo is inactive (bin/fm-project-mode.sh's header carries that decision). A
+#   yolo is inactive (bin/fm-project-mode.sh's header carries that decision).
+#   --yolo on is also refused while voice is in play, since the captain sets
+#   yolo at the keyboard (bin/fm-inbox.sh voice-gate owns that rule). A
 #   registry entry the parser refuses stops the spawn rather than launching on a
 #   guessed posture. A
 #   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
@@ -854,6 +856,14 @@ else
       exit 1
       ;;
     esac
+    # yolo is standing merge authority the captain sets at the keyboard, so a
+    # task never starts with it while voice is in play (bin/fm-inbox.sh
+    # voice-gate owns the rule).
+    if [ "$YOLO" = on ] && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$SCRIPT_DIR/fm-inbox.sh" voice-gate merge 2>/dev/null; then
+      echo "error: --yolo on is refused: the captain has spoken by voice since the last keyboard message, and the captain sets yolo at the keyboard; spawn with --yolo off, or with --yolo on once the captain gives it at the keyboard; nothing was spawned" >&2
+      exit 1
+    fi
   else
     [ "$MODE_SET" -eq 0 ] || {
       echo "error: --mode applies only to ship spawns; a scout delivers a report and a secondmate records its own fixed posture" >&2
