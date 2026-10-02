@@ -33,6 +33,9 @@ install_runner() {  # <case-dir>
   # The return brief's durable sources: the posture-record owner, the outcome
   # store owner, and the backlog reader with its tasks-axi probe.
   cp "$ROOT/bin/fm-afk-contract.sh" "$dir/bin/"
+  # The posture-record owner asks the phone channel's owner for the reach and
+  # the voice-authority rule on every entry.
+  cp "$ROOT/bin/fm-inbox.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-branch-outcome.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-tasks-axi-lib.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-hold-reason-lib.sh" "$dir/bin/"

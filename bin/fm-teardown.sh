@@ -179,7 +179,8 @@
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
-#   when the captain has explicitly said to discard the work.
+#   when the captain has explicitly said to discard the work; it first asks
+#   bin/fm-inbox.sh voice-gate, which refuses a discard a voice note asked for.
 #   --legacy-record accepts a task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
@@ -411,6 +412,13 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 if [ "$FORCE" = --force ] && [ "$(fm_lease_actor)" = branch ]; then
   echo "error: forced teardown refused - the supervision branch cannot discard work" >&2
   exit "$FM_LEASE_REFUSE_EXIT"
+fi
+# Discarding work needs the captain's own word, which a voice note never is on
+# its own (bin/fm-inbox.sh voice-gate owns the rule).
+if [ "$FORCE" = --force ] && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+  "$SCRIPT_DIR/fm-inbox.sh" voice-gate discard; then
+  echo "error: forced teardown refused - voice cannot authorize discarding work under this home's voice-authority setting; nothing was changed" >&2
+  exit 1
 fi
 fm_lease_guard "$ID" "teardown (fm-teardown)"
 

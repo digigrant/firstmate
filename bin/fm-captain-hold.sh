@@ -74,6 +74,12 @@
 # answered captain call. A hold that expired by date (`--until` in the past) is
 # still answerable: the surviving hold annotations, not tasks-axi's live
 # `held:` bit, prove the captain owned it.
+# Before any of that, `answer` asks bin/fm-inbox.sh voice-gate, which owns the
+# phone channel's voice-authority rule, and records nothing when a voice note
+# would be answering the call. The keyed intake below does not ask again: its
+# channels are bound captured sources, and bin/fm-send.sh, the one channel
+# whose answer text firstmate writes, asks voice-gate itself before it feeds
+# the intake.
 #
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
@@ -1117,6 +1123,14 @@ command_answer() {
   done
   validate_slug task-id "$id"
   load_decision "$decision_file"
+  # Firstmate writes these words from what the captain said, and a voice note
+  # never answers a captain call on its own (bin/fm-inbox.sh voice-gate owns the
+  # rule). The keyed intake does not ask again: its channels are bound captured
+  # sources, and bin/fm-send.sh asks voice-gate itself before feeding it.
+  if [ "${FM_CAPTAIN_HOLD_KEYED_INTAKE:-}" != 1 ] \
+    && ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-inbox.sh" voice-gate decide; then
+    fail "captain-held task $id was not answered: voice cannot answer a captain call under this home's voice-authority setting"
+  fi
   acquire_task_control_lock "$id"
   require_tasks_axi
   task_show "$id" || fail "captain-held task $id is absent from this home's configured backlog (data directory $DATA)"
@@ -1439,7 +1453,7 @@ command_answers() {
       continue
     fi
     # shellcheck disable=SC2086  # release_flag is empty or a single literal flag.
-    if "$0" answer "$id" --decision-file "$tmp" $release_flag </dev/null >/dev/null 2>"$err"; then
+    if FM_CAPTAIN_HOLD_KEYED_INTAKE=1 "$0" answer "$id" --decision-file "$tmp" $release_flag </dev/null >/dev/null 2>"$err"; then
       # A parent-channel delivery problem is reported on stderr by the answer
       # path even when the close succeeded; keep it visible.
       [ ! -s "$err" ] || cat "$err" >&2

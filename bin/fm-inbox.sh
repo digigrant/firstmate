@@ -20,8 +20,8 @@
 #           fleet work and must not become fleet work.
 #
 # Usage:
-#   fm-inbox.sh note [--request-id <id>] [--json] [--] <text>...
-#   fm-inbox.sh note [--request-id <id>] [--json] -   (body from stdin)
+#   fm-inbox.sh note [--origin voice] [--request-id <id>] [--json] [--] <text>...
+#   fm-inbox.sh note [--origin voice] [--request-id <id>] [--json] -   (body from stdin)
 #   fm-inbox.sh announce [--json] <id>
 #   fm-inbox.sh reply [--json] <id> <text>... | reply [--json] <id> -
 #   fm-inbox.sh receipts [--after <cursor>] [--all-pending] [--all-handled] [--all-replies]
@@ -31,6 +31,13 @@
 #   fm-inbox.sh ask  <question>...
 #   fm-inbox.sh list
 #   fm-inbox.sh drain [--ack <id>...]
+#   fm-inbox.sh phone
+#   fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing]
+#   fm-inbox.sh keyboard
+#   fm-inbox.sh update [--reply-to <note-id>] (--voice <text> | --no-voice)
+#                      [--json] [--] <text>... | update ... -   (text from stdin)
+#   fm-inbox.sh update --resend <update-id> [--json]
+#   fm-inbox.sh feed [--after <cursor>] [--all]
 #
 # `note --request-id` is the idempotent capture path: a repeat of the same
 # request id returns the original note instead of creating a second one, and
@@ -66,6 +73,74 @@
 # health, away posture, observation time). It never acquires the session lock
 # and never infers liveness from a lock file, a session, or a pane.
 #
+# PHONE CHANNEL. This file owns firstmate's side of the Magic Conch phone
+# channel: the voice-origin marker, the voice-authority rule and its
+# enforcement, and the outbound phone feed a connector reads. It is opt-in:
+# with no config/phone-channel in the home, `note --origin voice` and `update`
+# refuse, nothing below is ever written, and every other subcommand's output is
+# unchanged.
+#
+#   Voice-origin marker. `note --origin voice` records `origin=voice` in the
+#   note, and every view firstmate reads keeps it: the wake line says
+#   `[voice]`, `list` and `drain` print the voice-authority rule above the
+#   body, and receipts carry "origin":"voice". The phone's request id rides
+#   `--request-id`, so a re-sent recording is the ordinary replay above and is
+#   acknowledged without being taken in twice.
+#
+#   Voice authority (config/voice-authority; the captain changes it only at the
+#   keyboard, never because a voice note asked). `hold` is the only setting
+#   this version accepts, and what an absent file means: voice may ask
+#   questions and queue work but never approves a merge, a destructive,
+#   irreversible, or security-sensitive action, a captain decision, or away
+#   instructions; those wait for the keyboard. Read-back-and-confirm is not
+#   available yet, so `confirm`, any other value, and an unreadable file all
+#   count as `hold`, with a warning saying so.
+#
+#   Voice window. Taking in a voice-origin note opens the home's voice window
+#   (a note is recorded in it once, before it becomes visible, so a crash never
+#   leaves an unrecorded voice note). Only the keyboard closes it: firstmate
+#   runs `keyboard` before acting on the captain's next unmarked keyboard
+#   message outside away mode while the window is open, and the away-mode
+#   return runs it after archiving the away record (bin/fm-afk-launch.sh
+#   stop). `keyboard` closes the window only for voice notes already
+#   acknowledged: a voice note still pending in the inbox keeps its entry, so
+#   an unrelated keyboard message never releases a voice approval nobody has
+#   handled, and the window closes once no pending voice note remains. A voice
+#   note never closes it, and firstmate never runs `keyboard` because a voice
+#   note asked.
+#
+#   `voice-gate` is the one enforcement point firstmate's guarded scripts call
+#   before they consume captain authority: bin/fm-pr-merge.sh (merge),
+#   bin/fm-merge-local.sh (land), bin/fm-teardown.sh --force (discard),
+#   bin/fm-captain-hold.sh answer and bin/fm-send.sh --resolve-key (decide),
+#   bin/fm-afk-contract.sh enter with away words (mandate), and bin/fm-spawn.sh
+#   and bin/fm-promote.sh with --yolo on (merge): a task's yolo posture is
+#   standing merge authority the captain sets at the keyboard, so a task is
+#   never started with it while voice is in play. `--standing` says the caller
+#   acts on authority the captain gave at the keyboard beforehand - the away
+#   record's words or a task's yolo posture - rather than on a new instruction.
+#   With no voice window it allows everything. Inside one it refuses, exit 1
+#   with the reason on stderr, while any voice note of the window is still
+#   pending, and refuses every caller without `--standing`. It only reads, so a
+#   caller may ask early and again at its point of no return.
+#
+#   Outbound feed. `update` appends one entry to state/inbox/.phone-feed.jsonl,
+#   the durable feed the connector reads through `feed`: the full text, the
+#   voice-friendly version firstmate wrote (null only with the explicit
+#   `--no-voice`, which leaves the hub's rule-based rewrite to speak it), and an
+#   update id minted here, a random `fmu-` id that no other entry carries, so it
+#   is globally unique and never reused. A reply (`--reply-to` a voice note) is
+#   accepted whenever the channel is configured, because it answers something
+#   the captain said on the phone; any other update is an escalation, accepted
+#   only while phone updates are on - the away record exists with
+#   `reach_channels: phone` (bin/fm-afk-contract.sh) - and otherwise reported
+#   `skipped` with nothing written. Routine progress is neither kind and never
+#   belongs in the feed. `--resend` appends the same entry again with the same
+#   update id and resend=true, so a re-sent update keeps its id. Each entry
+#   carries a per-feed sequence, and `feed --after <cursor>` returns the entries
+#   after it, bounded with an omitted[] disclosure like `receipts`.
+#   `phone` prints the channel's current state as key=value lines.
+#
 # Configuration. A region, a model id and an AWS profile name somebody's account
 # and somebody's choices, so this file carries no default for any of them. Each is
 # read from the home's gitignored config/ directory, or from the matching
@@ -85,14 +160,17 @@
 # need NO configuration at all, because they make no model call. The voice
 # handover depends on `note`, so it keeps working in a home that has configured
 # nothing. `--json` / `receipts` / `ready` require python3, which a firstmate
-# home already uses for other tools.
+# home already uses for other tools. The phone channel's subcommands make no
+# model call either; its only configuration is the opt-in above, and `update`
+# and `feed` also require python3.
 #
 # Environment:
 #   FM_HOME              operational home whose state/ and data/ are used.
 #
 # PRIVACY: `say` sends your audio and `ask` sends your question to Bedrock.
-# `note`, `announce`, `reply`, `receipts`, `ready`, `status`, `list` and `drain`
-# make no network call at all.
+# `note`, `announce`, `reply`, `receipts`, `ready`, `status`, `list`, `drain`,
+# and the phone channel's subcommands make no network call at all: the feed is
+# a local file, and carrying it anywhere is the connector's job.
 #
 # `note` is also the queueing half of the spoken interface: when the voice agent
 # in bin/fm-voice-relay.py hands real work over to firstmate, it runs this
@@ -203,6 +281,14 @@ RECEIPTS_PENDING_BOUND=20
 RECEIPTS_HANDLED_BOUND=20
 RECEIPTS_REPLIES_BOUND=20
 
+# The phone channel's records (see PHONE CHANNEL in the header).
+VOICE_WINDOW="$INBOX/.voice-window"
+VOICE_NOTED="$INBOX/.voice-noted"
+VOICE_LOCK="$INBOX/.voice.lock"
+PHONE_FEED="$INBOX/.phone-feed.jsonl"
+PHONE_FEED_LOCK="$INBOX/.phone-feed.lock"
+FEED_BOUND=50
+
 load_wake_lib() {
   local lib="$FM_ROOT/bin/fm-wake-lib.sh"
   [ "${FM_INBOX_WAKE_LIB:-}" = 1 ] && return 0
@@ -284,6 +370,16 @@ note_summary_from_body() {
   printf '%s' "$1" | tr '\n\t' '  ' | cut -c1-100
 }
 
+# The note's origin header (`voice` for a phone note), or nothing.
+note_origin() {  # <path>
+  [ -f "$1" ] || return 0
+  sed -n '/^--$/q;s/^origin=//p' "$1" | head -n 1
+}
+
+note_is_voice() {  # <path>
+  [ "$(note_origin "$1")" = voice ]
+}
+
 write_note_file() {  # <path> <id> <source> <body> [extra] [request-id]
   local path=$1 id=$2 source=$3 body=$4 extra=${5:-} request_id=${6:-}
   {
@@ -307,7 +403,7 @@ emit_note_json() {  # <outcome> <id> <request-id> <saved> <announced> <path> [ac
   python3 - "$1" "$2" "$3" "$4" "$5" "$6" "${7:-0}" <<'PY'
 import json, sys
 outcome, note_id, request_id, saved, announced, path, acknowledged = sys.argv[1:8]
-json.dump({
+record = {
     "schema": "fm-inbox-note.v1",
     "outcome": outcome,
     "id": note_id,
@@ -316,7 +412,20 @@ json.dump({
     "announced": True if announced == "1" else False if announced == "0" else None,
     "acknowledged": acknowledged == "1",
     "path": path,
-}, sys.stdout, separators=(",", ":"))
+}
+# Only a voice-origin note gains a key, so every other note's receipt is
+# exactly what it was before the phone channel existed.
+try:
+    with open(path, "rb") as handle:
+        for raw in handle:
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if line == "--":
+                break
+            if line == "origin=voice":
+                record["origin"] = "voice"
+except OSError:
+    pass
+json.dump(record, sys.stdout, separators=(",", ":"))
 sys.stdout.write("\n")
 PY
 }
@@ -334,7 +443,8 @@ PY
 # Returns 2 without waking when the note is no longer pending: firstmate has
 # already acknowledged it, so a wake would only spend a turn on an empty inbox.
 announce_note() {  # <id> <summary>
-  local id=$1 summary=$2 lib="$FM_ROOT/bin/fm-wake-lib.sh" status=0
+  local id=$1 summary=$2 lib="$FM_ROOT/bin/fm-wake-lib.sh" status=0 tag=""
+  note_is_voice "$INBOX/$id.note" && tag=" [voice]"
   if note_announced "$id"; then
     return 0
   fi
@@ -353,7 +463,7 @@ announce_note() {  # <id> <summary>
     fm_lock_release "$FM_WAKE_QUEUE_LOCK"
     return 2
   fi
-  if fm_wake_append_locked check "inbox:$id" "check: captain inbox note $id - $summary"; then
+  if fm_wake_append_locked check "inbox:$id" "check: captain inbox note $id$tag - $summary"; then
     mark_announced "$id"
   else
     status=1
@@ -407,13 +517,34 @@ claim_request_id() {  # <request-id> <note-id>  -> 0 claimed, 1 already exists
   return 1
 }
 
-publish_from_reservation() {  # <request-id> <source> <body> <extra>
-  local request_id=$1 source=$2 body=$3 extra=$4
-  local reserved="$REQUESTS/$request_id" id tmp
+reserved_note_id() {  # <request-id>
+  local reserved="$REQUESTS/$1" id
   [ -f "$reserved" ] || return 1
   id=$(tr -d '\r' <"$reserved")
   id=${id%%$'\n'*}
   valid_note_id "$id" || return 1
+  printf '%s\n' "$id"
+}
+
+# A replayed voice note is recorded in the voice window before it can become
+# visible, exactly as a first submission is; the record is written once, so a
+# replay after the keyboard closed the window never reopens it.
+record_replayed_voice_note() {  # <request-id> <origin>
+  local id path
+  id=$(reserved_note_id "$1") || return 0
+  path=$(note_path "$id" 2>/dev/null || true)
+  if [ -n "$path" ]; then
+    note_is_voice "$path" || return 0
+  elif [ "$2" != voice ]; then
+    return 0
+  fi
+  voice_window_note "$id"
+}
+
+publish_from_reservation() {  # <request-id> <source> <body> <extra>
+  local request_id=$1 source=$2 body=$3 extra=$4
+  local id tmp
+  id=$(reserved_note_id "$request_id") || return 1
   if [ ! -f "$INBOX/$id.note" ] && [ ! -f "$INBOX/handled/$id.note" ]; then
     tmp=$(mktemp "$INBOX/.staging-XXXXXX")
     write_note_file "$tmp" "$id" "$source" "$body" "$extra" "$request_id"
@@ -423,19 +554,25 @@ publish_from_reservation() {  # <request-id> <source> <body> <extra>
 }
 
 queue_note() {
-  local source=$1 body=$2 extra=${3:-} request_id=${4:-} json=${5:-0}
+  local source=$1 body=$2 extra=${3:-} request_id=${4:-} json=${5:-0} origin=${6:-}
   local strict=0
   if [ -n "$request_id" ] || [ "$json" -eq 1 ]; then
     strict=1
   fi
   [ -n "${body//[[:space:]]/}" ] || die "refusing to queue an empty note"
   mkdir -p "$INBOX"
+  if [ "$origin" = voice ]; then
+    extra="origin=voice${extra:+
+$extra}"
+  fi
 
   local tmp id summary staging_name reserved
 
   if [ -n "$request_id" ]; then
     reserved="$REQUESTS/$request_id"
     if [ -f "$reserved" ]; then
+      record_replayed_voice_note "$request_id" "$origin" \
+        || die "could not record voice note for request id $request_id in the voice window; retry the same request id"
       id=$(publish_from_reservation "$request_id" "$source" "$body" "$extra") \
         || die "request id $request_id is reserved but unreadable; retry the same request id"
       summary=$(note_summary_from_body "$(read_note_body "$(note_path "$id")")")
@@ -448,11 +585,17 @@ queue_note() {
     write_note_file "$tmp" "$id" "$source" "$body" "$extra" "$request_id"
     if ! claim_request_id "$request_id" "$id"; then
       rm -f "$tmp"
+      record_replayed_voice_note "$request_id" "$origin" \
+        || die "could not record voice note for request id $request_id in the voice window; retry the same request id"
       id=$(publish_from_reservation "$request_id" "$source" "$body" "$extra") \
         || die "request id $request_id is reserved but unreadable; retry the same request id"
       summary=$(note_summary_from_body "$(read_note_body "$(note_path "$id")")")
       finish_note_result replay "$id" "$request_id" "$json" "$strict" "$summary"
       return $?
+    fi
+    if [ "$origin" = voice ] && ! voice_window_note "$id"; then
+      rm -f "$tmp"
+      die "could not record voice note $id in the voice window; nothing is visible yet, so retry the same request id"
     fi
     mv "$tmp" "$INBOX/$id.note"
     summary=$(note_summary_from_body "$body")
@@ -464,38 +607,53 @@ queue_note() {
   staging_name=$(basename "$tmp")
   id="$(date +%s)-${staging_name#.staging-}"
   write_note_file "$tmp" "$id" "$source" "$body" "$extra" ""
+  if [ "$origin" = voice ] && ! voice_window_note "$id"; then
+    rm -f "$tmp"
+    die "could not record the voice note in the voice window; nothing was queued"
+  fi
   mv "$tmp" "$INBOX/$id.note"
   summary=$(note_summary_from_body "$body")
   finish_note_result created "$id" "" "$json" "$strict" "$summary"
 }
 
 cmd_note() {
-  local body json=0 request_id=""
+  local body json=0 request_id="" origin=""
+  local usage="usage: fm-inbox.sh note [--origin voice] [--request-id <id>] [--json] [--] <text>... (or: note -)"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --json) json=1; shift ;;
       --request-id)
-        [ "$#" -ge 2 ] || die "usage: fm-inbox.sh note [--request-id <id>] [--json] [--] <text>... (or: note -)"
+        [ "$#" -ge 2 ] || die "$usage"
         request_id=$2
         valid_request_id "$request_id" \
           || die "invalid request id (use 1-128 characters: A-Za-z0-9._:-)"
         shift 2
         ;;
+      --origin)
+        [ "$#" -ge 2 ] || die "$usage"
+        [ "$2" = voice ] || die "unknown note origin '$2' (the only origin is voice)"
+        origin=voice
+        shift 2
+        ;;
       --) shift; break ;;
-      -h|--help) die "usage: fm-inbox.sh note [--request-id <id>] [--json] [--] <text>... (or: note -)" ;;
+      -h|--help) die "$usage" ;;
       *) break ;;
     esac
   done
   if [ "$#" -eq 0 ]; then
-    die "usage: fm-inbox.sh note [--request-id <id>] [--json] [--] <text>... (or: note -)"
+    die "$usage"
   elif [ "$1" = "-" ]; then
-    [ "$#" -eq 1 ] || die "usage: fm-inbox.sh note [--request-id <id>] [--json] -"
+    [ "$#" -eq 1 ] || die "usage: fm-inbox.sh note [--origin voice] [--request-id <id>] [--json] -"
     body=$(cat; printf .)
     body=${body%.}
   else
     body="$*"
   fi
-  queue_note text "$body" "" "$request_id" "$json"
+  if [ "$origin" = voice ]; then
+    phone_channel_configured \
+      || die "no phone channel is configured in this home, so a voice-origin note is refused: the captain opts in by creating $CONFIG/phone-channel"
+  fi
+  queue_note text "$body" "" "$request_id" "$json" "$origin"
 }
 
 cmd_announce() {
@@ -729,6 +887,7 @@ def list_notes(folder):
             "source": meta.get("source"),
             "request_id": meta.get("request_id"),
             "announce_marker": meta.get("announce_marker") == "1",
+            "origin": meta.get("origin"),
             "body": body,
             "path": str(path),
         })
@@ -774,6 +933,9 @@ def enrich(note, acknowledged):
     rec["reply"] = reply_record(note_id)
     rec.pop("path", None)
     rec.pop("announce_marker", None)
+    # Only a voice-origin note carries the key, so other receipts are unchanged.
+    if not rec.get("origin"):
+        rec.pop("origin", None)
     return rec
 
 # Pending is listed before handled so a note acked mid-listing still appears
@@ -963,6 +1125,488 @@ sys.stdout.write("\n")
 PY
 }
 
+# ---------------------------------------------------------------- phone channel
+
+phone_channel_configured() {
+  [ -e "$CONFIG/phone-channel" ]
+}
+
+# The effective voice-authority setting, which is always `hold` in this
+# version: read-back-and-confirm is not available yet, and a typo or an
+# unreadable file must never widen what voice may approve. Anything but an
+# absent file or `hold` is reported on stderr.
+voice_authority() {
+  local path="$CONFIG/voice-authority" value
+  if [ ! -e "$path" ]; then
+    printf 'hold\n'
+    return 0
+  fi
+  if [ ! -r "$path" ]; then
+    printf 'fm-inbox: %s is unreadable; voice approvals are held for the keyboard\n' "$path" >&2
+    printf 'hold\n'
+    return 0
+  fi
+  value=$(read_setting voice-authority)
+  case "$value" in
+    hold) ;;
+    confirm)
+      printf "fm-inbox: %s holds 'confirm', but read-back-and-confirm is not available yet; voice approvals are held for the keyboard\n" \
+        "$path" >&2
+      ;;
+    *)
+      printf "fm-inbox: %s holds '%s', which is not a voice-authority setting (only hold is available); voice approvals are held for the keyboard\n" \
+        "$path" "$value" >&2
+      ;;
+  esac
+  printf 'hold\n'
+}
+
+# Phone updates are on while the away record exists with the phone as its
+# reach channel; bin/fm-afk-contract.sh is the one reader of that record.
+phone_updates_on() {
+  local reach
+  phone_channel_configured || return 1
+  reach=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+    "$SELF_DIR/fm-afk-contract.sh" field reach_channels 2>/dev/null) || return 1
+  [ "$reach" = phone ]
+}
+
+# Append one entry to the voice window. The caller holds VOICE_LOCK; the copy
+# is replaced by rename, so a reader never sees a partial window.
+voice_window_append() {  # <kind> <ref>
+  local tmp
+  tmp=$(mktemp "$INBOX/.voice-window.XXXXXX") || return 1
+  if { [ ! -f "$VOICE_WINDOW" ] || cat "$VOICE_WINDOW"; } >"$tmp" \
+    && printf '%s\t%s\t%s\n' "$1" "$(date +%s)" "$2" >>"$tmp" \
+    && mv "$tmp" "$VOICE_WINDOW"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+# Record a voice note in the voice window, once. The marker is written after
+# the entry, so a crash between them costs a duplicate entry, never a missing one.
+voice_window_note() {  # <note-id>
+  local id=$1 status=0
+  [ -f "$VOICE_NOTED/$id" ] && return 0
+  load_wake_lib || return 1
+  mkdir -p "$INBOX" "$VOICE_NOTED" || return 1
+  fm_lock_acquire_wait "$VOICE_LOCK" || return 1
+  if [ ! -f "$VOICE_NOTED/$id" ]; then
+    if voice_window_append voice "$id"; then
+      : >"$VOICE_NOTED/$id" || status=1
+    else
+      status=1
+    fi
+  fi
+  fm_lock_release "$VOICE_LOCK"
+  return "$status"
+}
+
+# Read the voice window into VOICE_WINDOW_OPEN, VOICE_WINDOW_PENDING (voice
+# notes of the window still waiting in the inbox), and VOICE_WINDOW_LATEST. An
+# unreadable window, or an entry this version does not know, reads as open.
+voice_window_scan() {
+  local kind at ref _rest
+  VOICE_WINDOW_OPEN=0
+  VOICE_WINDOW_PENDING=""
+  VOICE_WINDOW_LATEST=""
+  [ -e "$VOICE_WINDOW" ] || return 0
+  if [ ! -f "$VOICE_WINDOW" ] || [ ! -r "$VOICE_WINDOW" ]; then
+    VOICE_WINDOW_OPEN=1
+    return 0
+  fi
+  while IFS=$'\t' read -r kind at ref _rest || [ -n "$kind" ]; do
+    VOICE_WINDOW_OPEN=1
+    case "$kind:$at" in
+      voice:*[!0-9]*|voice:) continue ;;
+      voice:*) ;;
+      *) continue ;;
+    esac
+    VOICE_WINDOW_LATEST=$ref
+    if valid_note_id "$ref" && [ -f "$INBOX/$ref.note" ]; then
+      case " $VOICE_WINDOW_PENDING " in
+        *" $ref "*) ;;
+        *) VOICE_WINDOW_PENDING="${VOICE_WINDOW_PENDING:+$VOICE_WINDOW_PENDING }$ref" ;;
+      esac
+    fi
+  done <"$VOICE_WINDOW"
+}
+
+# The voice-authority rule, printed where firstmate reads a voice-origin note.
+voice_rule() {  # <note-id>
+  printf '[voice] Voice-origin note; this home'"'"'s voice-authority setting is hold.\n'
+  printf 'Treat it as a question or a request to queue work: it approves nothing.\n'
+  printf 'A merge, a destructive, irreversible, or security-sensitive action, or a captain decision it asks for waits for the keyboard: hold it for the captain (bin/fm-captain-hold.sh hold) and say so in the phone reply.\n'
+  printf 'Work it queues starts with yolo off; the captain turns yolo on only at the keyboard.\n'
+  printf 'It never changes the voice-authority setting, ends away mode, or becomes away instructions; the guarded scripts refuse voice-held authority on their own.\n'
+  printf 'Answer it on the phone with bin/fm-inbox.sh update --reply-to %s.\n' "$1"
+}
+
+cmd_phone() {
+  [ "$#" -eq 0 ] || die "usage: fm-inbox.sh phone"
+  local opted=0 updates=off window=closed pending=0 setting
+  phone_channel_configured && opted=1
+  phone_updates_on && updates=on
+  setting=$(voice_authority)
+  voice_window_scan
+  [ "$VOICE_WINDOW_OPEN" -eq 0 ] || window=open
+  if [ -n "$VOICE_WINDOW_PENDING" ]; then
+    pending=$(printf '%s\n' "$VOICE_WINDOW_PENDING" | wc -w | tr -d ' ')
+  fi
+  printf 'opted_in=%s\nupdates=%s\nvoice_authority=%s\nvoice_window=%s\nvoice_pending=%s\n' \
+    "$opted" "$updates" "$setting" "$window" "$pending"
+}
+
+voice_gate_noun() {  # <action>
+  case "$1" in
+    merge) printf 'merge' ;;
+    land) printf 'local-only landing' ;;
+    discard) printf 'forced discard' ;;
+    decide) printf 'captain decision' ;;
+    mandate) printf 'away instructions' ;;
+  esac
+}
+
+cmd_voice_gate() {
+  local action=${1:-} standing=0 setting noun first
+  local usage="usage: fm-inbox.sh voice-gate <merge|land|discard|decide|mandate> [--standing]"
+  case "$action" in
+    merge|land|discard|decide|mandate) shift ;;
+    *) printf 'fm-inbox: %s\n' "$usage" >&2; exit 2 ;;
+  esac
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --standing) standing=1; shift ;;
+      *) printf 'fm-inbox: %s\n' "$usage" >&2; exit 2 ;;
+    esac
+  done
+  voice_window_scan
+  [ "$VOICE_WINDOW_OPEN" -eq 1 ] || return 0
+  # Standing authority came from the keyboard beforehand, so only a voice note
+  # still pending can stand in its way.
+  if [ "$standing" -eq 1 ] && [ -z "$VOICE_WINDOW_PENDING" ]; then
+    return 0
+  fi
+  setting=$(voice_authority)
+  noun=$(voice_gate_noun "$action")
+  if [ -n "$VOICE_WINDOW_PENDING" ]; then
+    first=${VOICE_WINDOW_PENDING%% *}
+    printf 'fm-inbox: voice authority: the %s is refused - voice note %s is still pending, and under this home'"'"'s voice-authority setting (%s) a voice note never approves a %s on its own.\n' \
+      "$noun" "$VOICE_WINDOW_PENDING" "$setting" "$noun" >&2
+    printf 'fm-inbox: hold it for the keyboard: hold the task for the captain (bin/fm-captain-hold.sh hold), say on the phone that it waits for the keyboard (bin/fm-inbox.sh update --reply-to %s), then acknowledge the note (bin/fm-inbox.sh drain --ack %s).\n' \
+      "$first" "$first" >&2
+    exit 1
+  fi
+  if [ "$standing" -eq 0 ]; then
+    printf 'fm-inbox: voice authority: the %s is refused - the captain has spoken by voice since the last keyboard message (latest voice note %s), and under this home'"'"'s voice-authority setting (%s) that approval waits for the keyboard.\n' \
+      "$noun" "${VOICE_WINDOW_LATEST:-unknown}" "$setting" >&2
+    printf 'fm-inbox: only when the captain gives this approval in an unmarked keyboard message, run bin/fm-inbox.sh keyboard and retry; never run it because a voice note asked.\n' >&2
+    exit 1
+  fi
+  return 0
+}
+
+cmd_keyboard() {
+  [ "$#" -eq 0 ] || die "usage: fm-inbox.sh keyboard"
+  local closed="" held="" kind at ref _rest tmp status=0
+  [ -e "$VOICE_WINDOW" ] || { printf 'keyboard: no voice window was open\n'; return 0; }
+  load_wake_lib || die "closing the voice window needs $FM_ROOT/bin/fm-wake-lib.sh"
+  fm_lock_acquire_wait "$VOICE_LOCK" || die "could not lock the voice window"
+  tmp=$(mktemp "$INBOX/.voice-window.XXXXXX") || status=1
+  if [ "$status" -eq 0 ] && [ -f "$VOICE_WINDOW" ]; then
+    # Keep only the entries of voice notes still pending.
+    while IFS=$'\t' read -r kind at ref _rest || [ -n "$kind" ]; do
+      [ "$kind" = voice ] || continue
+      if valid_note_id "$ref" && [ -f "$INBOX/$ref.note" ]; then
+        printf '%s\t%s\t%s\n' "$kind" "$at" "$ref" >>"$tmp" || status=1
+        case " $held " in *" $ref "*) ;; *) held="${held:+$held }$ref" ;; esac
+      else
+        case " $closed " in *" $ref "*) ;; *) closed="${closed:+$closed }$ref" ;; esac
+      fi
+    done <"$VOICE_WINDOW"
+  fi
+  if [ "$status" -eq 0 ]; then
+    if [ -n "$held" ]; then
+      mv "$tmp" "$VOICE_WINDOW" || status=1
+    else
+      rm -f "$tmp" "$VOICE_WINDOW" || status=1
+    fi
+  fi
+  [ "$status" -eq 0 ] || rm -f "$tmp"
+  fm_lock_release "$VOICE_LOCK"
+  [ "$status" -eq 0 ] || die "could not close the voice window at $VOICE_WINDOW"
+  if [ -n "$held" ]; then
+    printf 'keyboard: closed the voice window for handled voice notes (%s); still held for the keyboard until handled: %s\n' \
+      "${closed:-none}" "$held"
+  else
+    printf 'keyboard: closed the voice window (voice notes: %s)\n' "${closed:-none}"
+  fi
+}
+
+# Append one feed entry, or re-append an existing one with --resend. The caller
+# holds PHONE_FEED_LOCK. Text and voice travel in the environment so neither is
+# ever parsed as an option. Prints "<update-id> <cursor>".
+feed_append() {  # new <kind> <reply-to> <request-id> <voice-mode> | resend <update-id>
+  python3 - "$PHONE_FEED" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$@" <<'PY'
+import json, os, sys, uuid
+
+feed, at, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+rows, ids, top = [], set(), 0
+if os.path.exists(feed):
+    with open(feed, "rb") as handle:
+        for raw in handle:
+            try:
+                row = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            rows.append(row)
+            if isinstance(row.get("update_id"), str):
+                ids.add(row["update_id"])
+            if isinstance(row.get("seq"), int) and row["seq"] > top:
+                top = row["seq"]
+
+if mode == "resend":
+    target = sys.argv[4]
+    found = [r for r in rows if r.get("update_id") == target]
+    if not found:
+        sys.exit(3)
+    entry = dict(found[-1])
+    entry["resend"] = True
+else:
+    kind, reply_to, request_id, voice_mode = sys.argv[4:8]
+    update_id = "fmu-" + uuid.uuid4().hex
+    while update_id in ids:
+        update_id = "fmu-" + uuid.uuid4().hex
+    entry = {
+        "schema": "fm-phone-update.v1",
+        "update_id": update_id,
+        "kind": kind,
+        "reply_to": reply_to or None,
+        "reply_to_request_id": request_id or None,
+        "resend": False,
+        "text": os.environ["FM_INBOX_UPDATE_TEXT"],
+        "voice": None if voice_mode == "none" else os.environ["FM_INBOX_UPDATE_VOICE"],
+    }
+entry["seq"] = top + 1
+entry["at"] = at
+
+line = (json.dumps(entry, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+fd = os.open(feed, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+try:
+    # A torn tail from a crash must not swallow this entry into its line.
+    if os.fstat(fd).st_size > 0:
+        with open(feed, "rb") as handle:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                line = b"\n" + line
+    os.write(fd, line)
+    os.fsync(fd)
+finally:
+    os.close(fd)
+print("%s %012d" % (entry["update_id"], entry["seq"]))
+PY
+}
+
+emit_update_json() {  # <outcome> <update-id> <cursor> [reason]
+  python3 - "$@" <<'PY'
+import json, sys
+outcome, update_id, cursor = sys.argv[1:4]
+reason = sys.argv[4] if len(sys.argv) > 4 else ""
+json.dump({
+    "schema": "fm-inbox-update.v1",
+    "outcome": outcome,
+    "update_id": update_id or None,
+    "cursor": cursor or None,
+    "reason": reason or None,
+}, sys.stdout, separators=(",", ":"))
+sys.stdout.write("\n")
+PY
+}
+
+cmd_update() {
+  local reply_to="" voice="" voice_mode="" json=0 resend="" text path
+  local kind request_id="" result rc=0 update_id cursor
+  local usage="usage: fm-inbox.sh update [--reply-to <note-id>] (--voice <text> | --no-voice) [--json] [--] <text>... (or: update ... -), or update --resend <update-id> [--json]"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --reply-to)
+        [ "$#" -ge 2 ] || die "$usage"
+        reply_to=$2
+        shift 2
+        ;;
+      --voice)
+        [ "$#" -ge 2 ] || die "$usage"
+        [ -z "$voice_mode" ] || die "give exactly one of --voice or --no-voice"
+        voice=$2
+        voice_mode=text
+        shift 2
+        ;;
+      --no-voice)
+        [ -z "$voice_mode" ] || die "give exactly one of --voice or --no-voice"
+        voice_mode=none
+        shift
+        ;;
+      --resend)
+        [ "$#" -ge 2 ] || die "$usage"
+        resend=$2
+        shift 2
+        ;;
+      --json) json=1; shift ;;
+      --) shift; break ;;
+      -h|--help) die "$usage" ;;
+      # Firstmate writes this text, so an unknown option is a mistake to
+      # refuse rather than words to send to the phone.
+      --*) die "unknown update option $1 (put -- before text that starts with a dash); $usage" ;;
+      *) break ;;
+    esac
+  done
+  phone_channel_configured \
+    || die "no phone channel is configured in this home: the captain opts in by creating $CONFIG/phone-channel"
+  need_python
+  mkdir -p "$INBOX"
+  load_wake_lib || die "the phone feed needs $FM_ROOT/bin/fm-wake-lib.sh"
+
+  if [ -n "$resend" ]; then
+    [ "$#" -eq 0 ] && [ -z "$reply_to" ] && [ -z "$voice_mode" ] \
+      || die "--resend re-sends a recorded update exactly as it was; give no text or other options"
+    fm_lock_acquire_wait "$PHONE_FEED_LOCK" || die "could not lock the phone feed"
+    result=$(feed_append resend "$resend") || rc=$?
+    fm_lock_release "$PHONE_FEED_LOCK"
+    [ "$rc" -ne 3 ] || die "no update $resend is recorded in the phone feed"
+    [ "$rc" -eq 0 ] || die "could not re-send update $resend"
+    update_id=${result%% *}
+    cursor=${result#* }
+    if [ "$json" -eq 1 ]; then
+      emit_update_json resent "$update_id" "$cursor"
+    else
+      printf 'resent %s\n' "$update_id"
+    fi
+    return 0
+  fi
+
+  if [ "$#" -eq 0 ]; then
+    die "$usage"
+  elif [ "$1" = "-" ]; then
+    [ "$#" -eq 1 ] || die "$usage"
+    text=$(cat; printf .)
+    text=${text%.}
+  else
+    text="$*"
+  fi
+  [ -n "${text//[[:space:]]/}" ] || die "refusing to send an empty update"
+  [ -n "$voice_mode" ] \
+    || die "give the voice-friendly version with --voice (or --no-voice to leave it to the hub's rewrite)"
+  if [ "$voice_mode" = text ]; then
+    [ -n "${voice//[[:space:]]/}" ] || die "the voice-friendly version is empty; pass --no-voice instead"
+  fi
+
+  if [ -n "$reply_to" ]; then
+    valid_note_id "$reply_to" || die "invalid note id: $reply_to"
+    path=$(note_path "$reply_to") || die "no such note: $reply_to"
+    note_is_voice "$path" || die "note $reply_to is not a voice-origin note, so it has no phone to answer"
+    request_id=$(sed -n '/^--$/q;s/^request_id=//p' "$path" | head -n 1)
+    kind=reply
+  else
+    kind=escalation
+    if ! phone_updates_on; then
+      if [ "$json" -eq 1 ]; then
+        emit_update_json skipped "" "" "phone updates are off"
+      else
+        printf 'skipped: phone updates are off (they are on only while away with the phone as the reach channel); nothing was sent\n'
+      fi
+      return 0
+    fi
+  fi
+
+  fm_lock_acquire_wait "$PHONE_FEED_LOCK" || die "could not lock the phone feed"
+  result=$(FM_INBOX_UPDATE_TEXT="$text" FM_INBOX_UPDATE_VOICE="$voice" \
+    feed_append new "$kind" "$reply_to" "$request_id" "$voice_mode") || rc=$?
+  fm_lock_release "$PHONE_FEED_LOCK"
+  [ "$rc" -eq 0 ] || die "could not write the update to the phone feed"
+  update_id=${result%% *}
+  cursor=${result#* }
+  if [ "$json" -eq 1 ]; then
+    emit_update_json created "$update_id" "$cursor"
+  else
+    printf 'update %s\n' "$update_id"
+  fi
+}
+
+cmd_feed() {
+  local after="" all=0
+  local usage="usage: fm-inbox.sh feed [--after <cursor>] [--all]"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --after)
+        [ "$#" -ge 2 ] || die "$usage"
+        after=$2
+        shift 2
+        ;;
+      --all) all=1; shift ;;
+      *) die "$usage" ;;
+    esac
+  done
+  need_python
+  python3 - "$PHONE_FEED" "$FEED_BOUND" "$all" "$after" "$FM_HOME" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'PY'
+import json, os, sys
+from pathlib import Path
+
+feed, bound, all_rows, after, home, generated = sys.argv[1:7]
+bound = int(bound)
+rows, malformed = [], 0
+if os.path.exists(feed):
+    with open(feed, "rb") as handle:
+        for raw in handle:
+            if not raw.strip():
+                continue
+            try:
+                row = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                malformed += 1
+                continue
+            if not isinstance(row, dict) or not isinstance(row.get("seq"), int) \
+                    or not isinstance(row.get("update_id"), str):
+                malformed += 1
+                continue
+            row["cursor"] = "%012d" % row["seq"]
+            rows.append(row)
+rows.sort(key=lambda r: r["seq"])
+if after:
+    rows = [r for r in rows if r["cursor"] > after]
+omitted = []
+if all_rows != "1" and len(rows) > bound:
+    omitted.append({
+        "surface": "updates omitted by bound: %d" % (len(rows) - bound),
+        "reveal": "pass --all, or read on with --after the returned cursor",
+    })
+    rows = rows[:bound]
+if malformed:
+    omitted.append({
+        "surface": "malformed feed lines: %d" % malformed,
+        "reveal": "inspect %s" % feed,
+    })
+updates = []
+for r in rows:
+    updates.append({k: r.get(k) for k in (
+        "update_id", "cursor", "at", "kind", "reply_to", "reply_to_request_id",
+        "resend", "text", "voice")})
+json.dump({
+    "schema": "fm-inbox-feed.v1",
+    "home": "/".join(Path(home).parts[-2:]) if home else home,
+    "generated": generated,
+    "updates": updates,
+    "cursor": updates[-1]["cursor"] if updates else (after or ""),
+    "omitted": omitted,
+}, sys.stdout, separators=(",", ":"), ensure_ascii=False)
+sys.stdout.write("\n")
+PY
+}
+
 # ---------------------------------------------------------------- say
 
 cmd_say() {
@@ -1108,6 +1752,9 @@ cmd_list() {
     [ -e "$f" ] || break
     any=1
     printf '%s\n' "$(basename "$f" .note)"
+    if note_is_voice "$f"; then
+      voice_rule "$(basename "$f" .note)" | sed 's/^/  /'
+    fi
     sed -n '/^--$/,$p' "$f" | tail -n +2 | sed 's/^/    /'
   done
   [ "$any" -eq 1 ] || printf '(inbox empty)\n'
@@ -1146,6 +1793,11 @@ case "${1:-}" in
   ask)      shift; cmd_ask "$@" ;;
   list)     shift; cmd_list ;;
   drain)    shift; cmd_drain "$@" ;;
+  phone)    shift; cmd_phone "$@" ;;
+  voice-gate) shift; cmd_voice_gate "$@" ;;
+  keyboard) shift; cmd_keyboard "$@" ;;
+  update)   shift; cmd_update "$@" ;;
+  feed)     shift; cmd_feed "$@" ;;
   ''|-h|--help|help)
     # The whole header block, found rather than counted: everything after the
     # shebang up to the first line that is not a comment. A fixed line range

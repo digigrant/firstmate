@@ -108,6 +108,10 @@
 # (bin/fm-branch-prompt.sh "Postures"). An unreadable record refuses rather
 # than being skipped, neither posture releases a captain hold, and away
 # authority lapses when the record is archived.
+# Every authority read also asks bin/fm-inbox.sh voice-gate, which owns the
+# phone channel's voice-authority rule: away authority and a task's yolo=on are
+# standing authority, and any other merge is refused while the voice window
+# withholds a voice-given approval.
 # The authority read and synchronous forge command share the away record's
 # cross-subsystem lock, which bin/fm-afk-contract.sh owns, closing the common
 # live-owner TOCTOU; failure to take it refuses before the forge call. Async and
@@ -1141,6 +1145,23 @@ require_current_away_authority() {
     echo "error: --allow-missing is attended-only; while the away-posture record exists every required check must report" >&2
     return 2
   fi
+  require_voice_authority
+}
+
+# A voice note never becomes merge authority on its own (bin/fm-inbox.sh
+# voice-gate owns the rule). Away authority and a task's yolo posture are
+# standing authority the captain gave at the keyboard beforehand; any other
+# merge acts on a new captain instruction.
+require_voice_authority() {
+  local standing=''
+  if [ "$FM_PR_AWAY_POSTURE" = true ] \
+    || [ "$(grep '^yolo=' "$META" | tail -1 | cut -d= -f2- || true)" = on ]; then
+    standing=--standing
+  fi
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/fm-inbox.sh" voice-gate merge ${standing:+"$standing"} && return 0
+  echo "error: PR merge refused - voice cannot approve it under this home's voice-authority setting; nothing was merged" >&2
+  return 1
 }
 
 persist_accepted_merge_authority() {
