@@ -1,0 +1,33 @@
+ok - return catch-up owns live blocker remediation, reports itself to Bearings as content, preserves evidence once, and clears idempotently
+ok - tmux and Herdr blockers require the same explicit durable reclassification before ordinary work
+ok - needs-decision remains reportable without masquerading as a firstmate-actionable blocker
+ok - AFK return re-drains published wakes until handling acknowledges
+ok - away-mode re-entry fails closed while the prior return catch-up is pending
+ok - /quiet off's return path behaves identically for a quiet-content flag as for a legacy away-content one
+ok - check retries recorded terminal teardown and keeps catch-up gated until success
+ok - an unreadable superseded mandate stays required until its record validates
+ok - the retained contract epoch requires its final archive on every check
+ok - the return brief renders health, the words with the session account, waiting, could-not-fix, handled, and cost from durable records, and the gate shrinks to what the away session could not fix
+ok - the return brief lists landed work whose worker is still up, from the durable merge marker only, without gating on it and never offering a secondmate for teardown
+ok - the return brief points at the drain for branch outcomes on a host home and leaves the read cursor to it, and a Pi home's brief is unchanged
+ok - the all-silent return keeps the outcome stored without promising a drain presentation
+ok - a drain that cannot record its branch-outcome presentation keeps the return's catch-up gated until a check records it
+ok - a refreshed posture keeps its original window, superseded mandate, and earlier outcomes
+ok - a malformed posture record stays live and gates return catch-up
+ok - an epochless malformed record remains required until restored valid
+ok - an unreadable outcome store gates catch-up until a successful reread
+ok - an unavailable held listing gates catch-up until a successful reread
+ok - an unreadable status stays private and gates until a successful reread
+ok - a status-file-less leftover record gates return; a readable status on that same record is the proven path that passes
+ok - a leftover record with a readable status file lets return catch-up clear
+ok - the read-only guard treats the away-posture record as active away mode without the legacy flag
+ok - the return brief leads with supervisor health and names every detected gap
+ok - the return brief does not report an already-acked watcher-down marker as an open gap
+ok - the return brief reports a wake mid-handling at return as information, and only an open downtime episode as a gap
+ok - the return brief's failures section names an engine latch inside the away window with its time, error count, and cooldown state
+ok - a lost second trip append does not attach the current pause to a recovered episode
+ok - a recovered row preceding the stale retry time does not invent a second trip
+ok - a later failed probe does not change the trip-row error count
+ok - the return brief excludes prior-session latch rows
+ok - the return brief retains in-window trips and failed turns across a main restart
+ok - a return with only the legacy away flag still renders the brief and measures the window from the flag

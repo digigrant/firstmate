@@ -1,0 +1,25 @@
+ok - plain note, list, and wake stay on the historical human path
+ok - plain note keeps exit 1 for a saved-but-unannounced failure
+ok - the same request id returns the original note as a distinguishable replay
+ok - a crash between recording the request id and publishing the note reuses the original id
+ok - saved-but-unannounced notes are repairable without creating a second note
+ok - repair and replay do not wake firstmate for an already-acknowledged note
+ok - receipts JSON is bounded by fixed bounds and discloses what it omitted
+ok - notes that predate the announcement marker are unknown, not re-announced
+ok - the reply channel is durable and its cursor is a strict order
+ok - the reply cursor never goes backwards when the sequence counter is lost
+ok - a reply without a valid sequence is reported as malformed
+ok - a non-UTF-8 note does not break the receipts view
+ok - readiness says unknown (or not-receivable) instead of inferring liveness from a lock
+ok - empty bodies and unsafe request ids are refused
+ok - a note body that opens with a double dash is queued as text
+ok - drain --ack still moves the note to handled
+ok - without config/phone-channel no voice note enters and the gate allows everything
+ok - a voice note keeps its marker in every view and a re-sent recording is taken in once
+ok - a voice note completed after a crash is recorded in the voice window
+ok - under hold, voice approves nothing until the keyboard closes the voice window
+ok - the keyboard closes the voice window only for voice notes already handled
+fm-inbox: /tmp/fm-inbox.ONASoQ/phone-confirm-off/config/voice-authority holds 'confirm', but read-back-and-confirm is not available yet; voice approvals are held for the keyboard
+fm-inbox: /tmp/fm-inbox.ONASoQ/phone-confirm-off/config/voice-authority holds 'bogus', which is not a voice-authority setting (only hold is available); voice approvals are held for the keyboard
+ok - a confirm setting counts as hold, a spoken confirm approves nothing, and the read-back options are gone
+ok - the phone feed carries replies and away escalations with unique ids that a re-send keeps
