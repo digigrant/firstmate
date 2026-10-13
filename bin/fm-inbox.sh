@@ -135,8 +135,8 @@
 #   accepted whenever the channel is configured, because it answers something
 #   the captain said on the phone, and `reply` on a voice-origin note sends it
 #   the same way (no voice version, so the hub's rewrite speaks it) unless the
-#   feed already answers that note; any other update is an escalation, accepted
-#   only while phone updates are on - the away record exists with
+#   feed already holds that exact text for that note; any other update is an
+#   escalation, accepted only while phone updates are on - the away record exists with
 #   `reach_channels: phone` (bin/fm-afk-contract.sh) - and otherwise reported
 #   `skipped` with nothing written. Routine progress is neither kind and never
 #   belongs in the feed. `--resend` appends the same entry again with the same
