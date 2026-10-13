@@ -1431,7 +1431,8 @@ PY
 # for, so it goes out as a feed reply with the hub's rewrite left to speak it.
 # Prints the update id, or nothing when there is no phone to answer (a note that
 # did not come from the phone, a home that is not opted in) or the feed already
-# holds an answer to this note, so `update --reply-to` first never doubles it.
+# holds this same text for this note, so `update --reply-to` first never doubles
+# it while a different answer still reaches the phone.
 publish_reply_to_phone() {  # <note-id> <note-path> <text>
   local id=$1 path=$2 text=$3 result rc=0
   note_is_voice "$path" || return 0
@@ -1440,7 +1441,21 @@ publish_reply_to_phone() {  # <note-id> <note-path> <text>
   mkdir -p "$INBOX"
   load_wake_lib || return 1
   fm_lock_acquire_wait "$PHONE_FEED_LOCK" || return 1
-  if [ -f "$PHONE_FEED" ] && grep -qF "\"reply_to\":\"$id\"" "$PHONE_FEED"; then
+  if [ -f "$PHONE_FEED" ] && FM_INBOX_UPDATE_TEXT="$text" python3 - "$PHONE_FEED" "$id" <<'PY'
+import json, os, sys
+feed, note_id = sys.argv[1:3]
+text = os.environ["FM_INBOX_UPDATE_TEXT"]
+with open(feed, "rb") as handle:
+    for raw in handle:
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("reply_to") == note_id and row.get("text") == text:
+            sys.exit(0)
+sys.exit(1)
+PY
+  then
     fm_lock_release "$PHONE_FEED_LOCK"
     return 0
   fi
