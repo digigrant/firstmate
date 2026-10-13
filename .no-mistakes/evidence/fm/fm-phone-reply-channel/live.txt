@@ -1,0 +1,44 @@
+## 1. voice note 'Hello, can you hear me?' -> reply -> phone feed
+note 1791877351-z3Oq63
+replied 1791877351-z3Oq63
+update fmu-24c2baa7472743d686360c84b0f6fc69
+{"schema":"fm-inbox-feed.v1","home":"dev/firstmate","generated":"2026-10-13T07:42:31Z","updates":[{"update_id":"fmu-24c2baa7472743d686360c84b0f6fc69","cursor":"000000000001","at":"2026-10-13T07:42:31Z","kind":"reply","reply_to":"1791877351-z3Oq63","reply_to_request_id":"m-1","resend":false,"text":"Yes, I can hear you.","voice":null}],"cursor":"000000000001","omitted":[]}
+
+## 2. typed note reply -> no feed entry added
+replied 1791877351-KNsFXG
+feed entries: 1
+
+## 3. update --reply-to first, then same-text reply -> no duplicate
+fm-inbox: give the voice-friendly version with --voice (or --no-voice to leave it to the hub's rewrite)
+replied 1791877352-r8T3bz
+update fmu-3f8da867d3b1428b9936030c1f0508e1
+feed entries: 2
+
+## 4. interim ack then different real answer -> both sent
+fm-inbox: give the voice-friendly version with --voice (or --no-voice to leave it to the hub's rewrite)
+replied 1791877352-oHDTI4
+update fmu-6e983e896ba847669de185bfb6c226dc
+m-1 Yes, I can hear you.
+m-2 On it.
+m-3 Done.
+
+## 5. opted out -> no feed
+fm-inbox: no phone channel is configured in this home, so a voice-origin note is refused: the captain opts in by creating /tmp/fm-lab.8WBbpH/config/phone-channel
+note: Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;print(json.load(sys.stdin).get("id"))
+                          ~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/json/__init__.py", line 298, in load
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)

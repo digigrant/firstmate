@@ -1,0 +1,16 @@
+## A. update --reply-to first, then same-text reply -> no duplicate
+update fmu-75c57c45bf45491fa02fb188c60fa749
+replied 1791877358-e6fgmo
+  m-2 | On it.
+## B. interim ack then different real answer -> both on feed
+update fmu-749c8e441b7c4bbdb096481854234d7a
+replied 1791877359-jYA8PG
+update fmu-6d7b34bc2b2c46db9da0e0fcaf8fa53c
+  m-2 | On it.
+  m-3 | Working on it.
+  m-3 | Done.
+## C. note taken in while opted in, then opt out, reply recorded, nothing sent
+replied 1791877359-WLZ5yf
+  m-2 | On it.
+  m-3 | Working on it.
+  m-3 | Done.
