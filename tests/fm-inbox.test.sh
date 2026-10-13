@@ -783,3 +783,52 @@ unknown_resend=$?
 set -e
 expect_code 1 "$unknown_resend" "re-sending an unknown update is refused"
 pass "the phone feed carries replies and away escalations with unique ids that a re-send keeps"
+
+# Answering a voice-origin note with `reply` also answers it on the phone, so a
+# phone message is never left with only a written record. A note that did not
+# come from the phone, and a feed that already holds the same answer, are untouched.
+home=$(phone_home phone-reply)
+vid=$(run_inbox "$home" note --origin voice --request-id r-1 --json "can you hear me" | json_get id)
+typed=$(run_inbox "$home" note "typed" | sed -n 's/^queued //p')
+typed_out=$(run_inbox "$home" reply "$typed" "typed answer") || fail "a reply to a typed note should be recorded"
+assert_equals "replied $typed" "$typed_out" "a reply to a typed note prints exactly what it always did"
+typed_json=$(run_inbox "$home" reply --json "$vid" "Yes, loud and clear.") || fail "a reply to a voice note should be recorded"
+assert_equals "created" "$(printf '%s' "$typed_json" | json_get outcome)" "the voice-note reply is recorded"
+phone_uid=$(printf '%s' "$typed_json" | json_get phone_update_id)
+case "$phone_uid" in fmu-[0-9a-f]*) ;; *) fail "the reply names no phone update: $phone_uid" ;; esac
+feed=$(run_inbox "$home" feed) || fail "feed should read"
+assert_equals "1" "$(printf '%s' "$feed" | json_len updates)" "only the voice-note reply reached the feed"
+assert_equals "reply" "$(printf '%s' "$feed" | json_get updates 0 kind)" "the feed entry is a reply"
+assert_equals "$vid" "$(printf '%s' "$feed" | json_get updates 0 reply_to)" "it answers the voice note"
+assert_equals "r-1" "$(printf '%s' "$feed" | json_get updates 0 reply_to_request_id)" \
+  "it names the phone's request id"
+assert_equals "Yes, loud and clear." "$(printf '%s' "$feed" | json_get updates 0 text)" \
+  "the phone gets the recorded reply text"
+assert_equals "None" "$(printf '%s' "$feed" | json_get updates 0 voice)" \
+  "the voice version is left to the hub's rewrite"
+assert_equals "$phone_uid" "$(printf '%s' "$feed" | json_get updates 0 update_id)" \
+  "the reply output names the feed entry it created"
+assert_equals "1" "$(gate_code "$home" merge)" "a recorded reply approves nothing"
+plain_vid=$(run_inbox "$home" note --origin voice --request-id r-2 --json "status please" | json_get id)
+plain_out=$(run_inbox "$home" reply "$plain_vid" "Two jobs are running.") || fail "a plain reply should be recorded"
+assert_contains "$plain_out" "replied $plain_vid" "the plain reply is recorded"
+assert_contains "$plain_out" "update fmu-" "the plain reply names its phone update"
+answered=$(run_inbox "$home" note --origin voice --request-id r-3 --json "already answered" | json_get id)
+run_inbox "$home" update --reply-to "$answered" --voice "On it." "On it." >/dev/null || fail "update --reply-to should send"
+answered_out=$(run_inbox "$home" reply "$answered" "On it.") || fail "the durable record should still be written"
+assert_equals "replied $answered" "$answered_out" "a note the feed already answers is not sent twice"
+assert_equals "3" "$(run_inbox "$home" feed | json_len updates)" "the feed holds one answer per voice note"
+interim=$(run_inbox "$home" note --origin voice --request-id r-5 --json "slow question" | json_get id)
+run_inbox "$home" update --reply-to "$interim" --no-voice "On it." >/dev/null || fail "an interim ack should send"
+interim_out=$(run_inbox "$home" reply "$interim" "Done: it is merged.") || fail "the real answer should be recorded"
+assert_contains "$interim_out" "update fmu-" "a different answer after an interim ack is sent to the phone"
+assert_equals "Done: it is merged." "$(run_inbox "$home" feed | json_get updates 4 text)" \
+  "the phone feed ends with the real answer"
+assert_equals "5" "$(run_inbox "$home" feed | json_len updates)" "the interim ack and the real answer are both in the feed"
+opted_out=$(run_inbox "$home" note --origin voice --request-id r-4 --json "after opt-out" | json_get id)
+rm -f "$home/config/phone-channel"
+opted_out_out=$(run_inbox "$home" reply "$opted_out" "No phone left.") || fail "a reply is still recorded after opting out"
+assert_equals "replied $opted_out" "$opted_out_out" "a home that opted out sends nothing to a phone"
+: > "$home/config/phone-channel"
+assert_equals "5" "$(run_inbox "$home" feed | json_len updates)" "nothing reached the feed after the opt-out"
+pass "replying to a voice-origin note also answers it on the phone, and only then"

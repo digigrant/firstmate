@@ -2267,6 +2267,7 @@ Only the captain changes the setting, at the keyboard; Firstmate never changes i
 The file is read as its first line that is not blank and not a `#` comment, and any other value or an unreadable file also counts as `hold` with a warning, so a typo never widens what voice may approve.
 
 With the channel on, `/afk` records the phone as away mode's reach: replies and escalations, decisions included, go to the phone for the whole away window.
+A recorded `fm-inbox.sh reply` to a voice-origin note is also sent to the phone feed, so a phone message is answered on the phone however Firstmate answers it.
 The phone may also switch away mode on, and only the captain's first keyboard message switches it off, which ends phone updates and brings the usual return catch-up.
 Neither file is inherited by secondmate homes, which never talk to the captain directly.
 

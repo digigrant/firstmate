@@ -68,7 +68,9 @@
 # `reply` is how the primary publishes its actual answer against a note id.
 # Each reply is stamped with a durable per-home sequence, so the receipts cursor
 # is a strict total order and two replies recorded in the same second are both
-# readable. One reply per note: a second one is refused.
+# readable. One reply per note: a second one is refused. A reply to a
+# voice-origin note is also sent to the phone feed (see Outbound feed), so
+# a phone message is answered on the phone whichever way firstmate answers it.
 # `ready` is the read-only primary-readiness projection (lock, wake-consumer
 # health, away posture, observation time). It never acquires the session lock
 # and never infers liveness from a lock file, a session, or a pane.
@@ -131,8 +133,10 @@
 #   update id minted here, a random `fmu-` id that no other entry carries, so it
 #   is globally unique and never reused. A reply (`--reply-to` a voice note) is
 #   accepted whenever the channel is configured, because it answers something
-#   the captain said on the phone; any other update is an escalation, accepted
-#   only while phone updates are on - the away record exists with
+#   the captain said on the phone, and `reply` on a voice-origin note sends it
+#   the same way (no voice version, so the hub's rewrite speaks it) unless the
+#   feed already holds that exact text for that note; any other update is an
+#   escalation, accepted only while phone updates are on - the away record exists with
 #   `reach_channels: phone` (bin/fm-afk-contract.sh) - and otherwise reported
 #   `skipped` with nothing written. Routine progress is neither kind and never
 #   belongs in the feed. `--resend` appends the same entry again with the same
@@ -378,6 +382,11 @@ note_origin() {  # <path>
 
 note_is_voice() {  # <path>
   [ "$(note_origin "$1")" = voice ]
+}
+
+# The phone's request id recorded on a note, or nothing.
+note_request_id() {  # <path>
+  sed -n '/^--$/q;s/^request_id=//p' "$1" | head -n 1
 }
 
 write_note_file() {  # <path> <id> <source> <body> [extra] [request-id]
@@ -746,7 +755,7 @@ next_reply_seq() {
 }
 
 cmd_reply() {
-  local json=0 id body path staging seq
+  local json=0 id body path staging seq phone_update
   if [ "${1:-}" = "--json" ]; then
     json=1
     shift
@@ -791,21 +800,28 @@ cmd_reply() {
   } >"$staging"
   mv "$staging" "$REPLIES/$id"
   fm_lock_release "$REPLY_SEQ_LOCK"
+  # The recorded reply stands whether or not the phone feed takes it.
+  phone_update=$(publish_reply_to_phone "$id" "$path" "$body") \
+    || die "reply $id is recorded, but it did not reach the phone feed; send it with: fm-inbox.sh update --reply-to $id"
   if [ "$json" -eq 1 ]; then
     need_python
-    python3 - "$id" "$REPLIES/$id" <<'PY'
+    python3 - "$id" "$REPLIES/$id" "$phone_update" <<'PY'
 import json, sys
-note_id, path = sys.argv[1], sys.argv[2]
-json.dump({
+note_id, path, phone_update = sys.argv[1], sys.argv[2], sys.argv[3]
+out = {
     "schema": "fm-inbox-reply.v1",
     "outcome": "created",
     "id": note_id,
     "path": path,
-}, sys.stdout, separators=(",", ":"))
+}
+if phone_update:
+    out["phone_update_id"] = phone_update
+json.dump(out, sys.stdout, separators=(",", ":"))
 sys.stdout.write("\n")
 PY
   else
     printf 'replied %s\n' "$id"
+    [ -z "$phone_update" ] || printf 'update %s\n' "$phone_update"
   fi
 }
 
@@ -1411,6 +1427,45 @@ print("%s %012d" % (entry["update_id"], entry["seq"]))
 PY
 }
 
+# A reply recorded for a voice-origin note is also what the phone is waiting
+# for, so it goes out as a feed reply with the hub's rewrite left to speak it.
+# Prints the update id, or nothing when there is no phone to answer (a note that
+# did not come from the phone, a home that is not opted in) or the feed already
+# holds this same text for this note, so `update --reply-to` first never doubles
+# it while a different answer still reaches the phone.
+publish_reply_to_phone() {  # <note-id> <note-path> <text>
+  local id=$1 path=$2 text=$3 result rc=0
+  note_is_voice "$path" || return 0
+  phone_channel_configured || return 0
+  need_python
+  mkdir -p "$INBOX"
+  load_wake_lib || return 1
+  fm_lock_acquire_wait "$PHONE_FEED_LOCK" || return 1
+  if [ -f "$PHONE_FEED" ] && FM_INBOX_UPDATE_TEXT="$text" python3 - "$PHONE_FEED" "$id" <<'PY'
+import json, os, sys
+feed, note_id = sys.argv[1:3]
+text = os.environ["FM_INBOX_UPDATE_TEXT"]
+with open(feed, "rb") as handle:
+    for raw in handle:
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("reply_to") == note_id and row.get("text") == text:
+            sys.exit(0)
+sys.exit(1)
+PY
+  then
+    fm_lock_release "$PHONE_FEED_LOCK"
+    return 0
+  fi
+  result=$(FM_INBOX_UPDATE_TEXT="$text" FM_INBOX_UPDATE_VOICE="" \
+    feed_append new reply "$id" "$(note_request_id "$path")" none) || rc=$?
+  fm_lock_release "$PHONE_FEED_LOCK"
+  [ "$rc" -eq 0 ] || return 1
+  printf '%s\n' "${result%% *}"
+}
+
 emit_update_json() {  # <outcome> <update-id> <cursor> [reason]
   python3 - "$@" <<'PY'
 import json, sys
@@ -1508,7 +1563,7 @@ cmd_update() {
     valid_note_id "$reply_to" || die "invalid note id: $reply_to"
     path=$(note_path "$reply_to") || die "no such note: $reply_to"
     note_is_voice "$path" || die "note $reply_to is not a voice-origin note, so it has no phone to answer"
-    request_id=$(sed -n '/^--$/q;s/^request_id=//p' "$path" | head -n 1)
+    request_id=$(note_request_id "$path")
     kind=reply
   else
     kind=escalation
